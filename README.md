@@ -1,9 +1,39 @@
 # StandUp
 
-StandUp is an iPhone and Apple Watch app for automatic sedentary reminders.
+StandUp is a local-first iPhone and Apple Watch app for automatic sedentary reminders.
 
-The project is being built as a local-first MVP:
+## What It Does
 
-- Apple Watch tracks low-activity sedentary time and sends reminders.
-- iPhone configures reminder rules and reviews sedentary history.
-- Core business logic lives in a Swift package so it can be tested without a full Xcode install.
+- Apple Watch estimates low-activity sitting time automatically.
+- Users can set the sedentary threshold from 15 to 120 minutes.
+- Reminders repeat every 10 minutes after the threshold until the user stands or skips.
+- Standing or walking for 2 continuous minutes resets the timer.
+- iPhone shows overdue sitting intervals, corrections, and 7/30-day trends.
+- Data stays local. There is no account system or server upload.
+
+## Structure
+
+- `Sources/StandUpCore`: tested core state machine and analytics.
+- `Checks/StandUpCoreChecks`: executable verification suite for core behavior.
+- `Apps/Shared`: storage, notification, motion, sync, and app model code.
+- `Apps/iOS`: iPhone SwiftUI app.
+- `Apps/Watch`: Apple Watch SwiftUI app.
+- `project.yml`: XcodeGen project definition.
+
+## Verify Core
+
+```sh
+swift run StandUpCoreChecks
+swift build
+```
+
+## Open In Xcode
+
+This repo uses XcodeGen for the iOS/watchOS project:
+
+```sh
+xcodegen generate
+open StandUp.xcodeproj
+```
+
+See `docs/DEVELOPMENT.md` for setup and real-device validation notes.
