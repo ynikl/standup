@@ -39,6 +39,7 @@ let checks: [(String, () throws -> Void)] = [
     ("daily summaries exclude corrected records", checkDailySummaries),
     ("newer synchronized revisions win", checkSynchronizedMerge),
     ("legacy records default modification time", checkLegacyRecordRevision),
+    ("legacy local state decodes without a session", checkLegacyLocalState),
     ("trend windows include exact calendar days", checkTrendWindow)
 ]
 
@@ -370,6 +371,28 @@ func checkLegacyRecordRevision() throws {
     let decoded = try JSONDecoder().decode(SedentaryRecord.self, from: legacy)
 
     try expect(decoded.modifiedAt == decoded.endedAt, "legacy record should use end time as revision")
+}
+
+func checkLegacyLocalState() throws {
+    let json = """
+    {
+      "settings": {
+        "sedentaryThresholdMinutes": 45,
+        "activeClearMinutes": 2,
+        "repeatReminderMinutes": 10,
+        "activeWindow": { "startMinuteOfDay": 540, "endMinuteOfDay": 1320 }
+      },
+      "records": []
+    }
+    """
+
+    let state = try JSONDecoder().decode(StandUpLocalState.self, from: Data(json.utf8))
+
+    try expect(state.session == .empty, "legacy state should start with an empty session")
+    try expect(
+        state.synchronized.settingsUpdatedAt == Date(timeIntervalSince1970: 0),
+        "legacy settings revision"
+    )
 }
 
 func checkTrendWindow() throws {

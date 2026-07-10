@@ -7,15 +7,15 @@ import WatchConnectivity
 
 @MainActor
 protocol StandUpSyncing: AnyObject {
-    var onReceive: ((StandUpPersistedState) -> Void)? { get set }
+    var onReceive: ((StandUpDataState) -> Void)? { get set }
 
     func activate()
-    func publish(settings: StandUpSettings, records: [SedentaryRecord])
+    func publish(_ state: StandUpDataState)
 }
 
 @MainActor
 final class WatchConnectivityStandUpBridge: NSObject, StandUpSyncing {
-    var onReceive: ((StandUpPersistedState) -> Void)?
+    var onReceive: ((StandUpDataState) -> Void)?
 
     private let encoder = JSONEncoder()
     private let decoder = JSONDecoder()
@@ -36,13 +36,12 @@ final class WatchConnectivityStandUpBridge: NSObject, StandUpSyncing {
         #endif
     }
 
-    func publish(settings: StandUpSettings, records: [SedentaryRecord]) {
+    func publish(_ state: StandUpDataState) {
         #if canImport(WatchConnectivity)
         guard WCSession.isSupported() else {
             return
         }
 
-        let state = StandUpPersistedState(settings: settings, records: records)
         guard let data = try? encoder.encode(state) else {
             return
         }
@@ -52,7 +51,7 @@ final class WatchConnectivityStandUpBridge: NSObject, StandUpSyncing {
     }
 
     private func receive(_ data: Data) {
-        guard let state = try? decoder.decode(StandUpPersistedState.self, from: data) else {
+        guard let state = try? decoder.decode(StandUpDataState.self, from: data) else {
             return
         }
         onReceive?(state)

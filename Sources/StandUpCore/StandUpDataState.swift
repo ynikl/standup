@@ -41,3 +41,40 @@ public struct StandUpDataState: Codable, Equatable, Sendable {
         )
     }
 }
+
+public struct StandUpLocalState: Codable, Equatable, Sendable {
+    public var synchronized: StandUpDataState
+    public var session: SedentarySessionState
+
+    public init(synchronized: StandUpDataState, session: SedentarySessionState = .empty) {
+        self.synchronized = synchronized
+        self.session = session
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case synchronized
+        case session
+        case settings
+        case records
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        if let synchronized = try container.decodeIfPresent(StandUpDataState.self, forKey: .synchronized) {
+            self.synchronized = synchronized
+        } else {
+            self.synchronized = StandUpDataState(
+                settings: try container.decode(StandUpSettings.self, forKey: .settings),
+                settingsUpdatedAt: Date(timeIntervalSince1970: 0),
+                records: try container.decode([SedentaryRecord].self, forKey: .records)
+            )
+        }
+        session = try container.decodeIfPresent(SedentarySessionState.self, forKey: .session) ?? .empty
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(synchronized, forKey: .synchronized)
+        try container.encode(session, forKey: .session)
+    }
+}

@@ -1,16 +1,9 @@
 import Foundation
 import StandUpCore
 
-struct StandUpPersistedState: Codable, Equatable {
-    var settings: StandUpSettings
-    var records: [SedentaryRecord]
-
-    static let empty = StandUpPersistedState(settings: .default, records: [])
-}
-
 protocol StandUpStorage {
-    func load() throws -> StandUpPersistedState
-    func save(_ state: StandUpPersistedState) throws
+    func load() throws -> StandUpLocalState
+    func save(_ state: StandUpLocalState) throws
 }
 
 struct LocalJSONStandUpStorage: StandUpStorage {
@@ -27,16 +20,22 @@ struct LocalJSONStandUpStorage: StandUpStorage {
         self.fileURL = directory.appendingPathComponent("standup-state.json")
     }
 
-    func load() throws -> StandUpPersistedState {
+    func load() throws -> StandUpLocalState {
         guard FileManager.default.fileExists(atPath: fileURL.path) else {
-            return .empty
+            return StandUpLocalState(
+                synchronized: StandUpDataState(
+                    settings: .default,
+                    settingsUpdatedAt: Date(timeIntervalSince1970: 0),
+                    records: []
+                )
+            )
         }
 
         let data = try Data(contentsOf: fileURL)
-        return try JSONDecoder.standUp.decode(StandUpPersistedState.self, from: data)
+        return try JSONDecoder.standUp.decode(StandUpLocalState.self, from: data)
     }
 
-    func save(_ state: StandUpPersistedState) throws {
+    func save(_ state: StandUpLocalState) throws {
         let directory = fileURL.deletingLastPathComponent()
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         let data = try JSONEncoder.standUp.encode(state)

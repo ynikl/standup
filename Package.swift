@@ -11,10 +11,17 @@ let package = Package(
     ],
     products: [
         .library(name: "StandUpCore", targets: ["StandUpCore"]),
+        .library(name: "StandUpShared", targets: ["StandUpShared"]),
         .executable(name: "StandUpCoreChecks", targets: ["StandUpCoreChecks"])
     ],
     targets: [
         .target(name: "StandUpCore"),
+        .target(
+            name: "StandUpShared",
+            dependencies: ["StandUpCore"],
+            path: "Apps/Shared",
+            exclude: ["Formatting.swift", "MotionActivityService.swift"]
+        ),
         .executableTarget(name: "StandUpCoreChecks", dependencies: ["StandUpCore"], path: "Checks/StandUpCoreChecks")
     ]
 )

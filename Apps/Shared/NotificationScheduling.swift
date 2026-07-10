@@ -5,6 +5,7 @@ import StandUpCore
 import UserNotifications
 #endif
 
+@MainActor
 protocol StandUpNotificationScheduling {
     func requestAuthorization() async throws -> Bool
     func scheduleSedentaryReminder(reason: NotificationReason?, seatedMinutes: Int?) async
