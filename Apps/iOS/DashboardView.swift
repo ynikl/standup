@@ -214,7 +214,7 @@ private struct PermissionBanner: View {
         if permissionState.notificationsAllowed == false || permissionState.motionAllowed == false {
             HStack(spacing: 12) {
                 Image(systemName: "exclamationmark.triangle.fill")
-                    .foregroundStyle(.standAlert)
+                    .foregroundStyle(Color.standAlert)
                 Text("Permissions need attention")
                     .font(.callout.weight(.medium))
                 Spacer()

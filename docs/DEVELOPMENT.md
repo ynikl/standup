@@ -12,6 +12,7 @@ Checks/run-shared-checks.sh
 Checks/check-watch-timeline.sh
 Checks/check-watch-bundle-metadata.sh
 Checks/check-watch-startup-order.sh
+Checks/check-history-correction-menu.sh
 swift build
 ```
 
@@ -34,6 +35,7 @@ The check runner covers:
 - stable Watch timeline scheduling across SwiftUI renders
 - standalone Watch app bundle metadata
 - Watch monitoring starts independently of notification authorization
+- complete and accessible iPhone history correction actions
 
 ## Generate Xcode Project
 

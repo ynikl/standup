@@ -30,6 +30,7 @@ Checks/run-shared-checks.sh
 Checks/check-watch-timeline.sh
 Checks/check-watch-bundle-metadata.sh
 Checks/check-watch-startup-order.sh
+Checks/check-history-correction-menu.sh
 swift build
 ```
 

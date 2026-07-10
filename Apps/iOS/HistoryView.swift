@@ -10,23 +10,15 @@ struct HistoryView: View {
                 ForEach(groupedRecords.keys.sorted(by: >), id: \.self) { day in
                     Section(day.formatted(date: .abbreviated, time: .omitted)) {
                         ForEach(groupedRecords[day] ?? []) { record in
-                            HistoryRow(record: record)
-                                .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-                                    Button("Restore") {
-                                        model.restore(recordID: record.id)
-                                    }
-                                    .tint(.standAccent)
-
-                                    Button("Movie") {
-                                        model.correct(recordID: record.id, reason: .watchingMovie)
-                                    }
-                                    .tint(.standInk)
-
-                                    Button("Meeting") {
-                                        model.correct(recordID: record.id, reason: .meeting)
-                                    }
-                                    .tint(.standAlert)
+                            HistoryRow(
+                                record: record,
+                                correct: { reason in
+                                    model.correct(recordID: record.id, reason: reason)
+                                },
+                                restore: {
+                                    model.restore(recordID: record.id)
                                 }
+                            )
                         }
                     }
                 }
@@ -47,6 +39,8 @@ struct HistoryView: View {
 
 private struct HistoryRow: View {
     let record: SedentaryRecord
+    let correct: (CorrectionReason) -> Void
+    let restore: () -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -58,6 +52,7 @@ private struct HistoryRow: View {
                 Text("+\(record.overageMinutes)m")
                     .font(.subheadline.weight(.semibold))
                     .foregroundStyle(record.isExcludedFromStats ? .secondary : Color.standAlert)
+                HistoryActionsMenu(record: record, correct: correct, restore: restore)
             }
 
             HStack(spacing: 10) {
@@ -73,5 +68,50 @@ private struct HistoryRow: View {
             .foregroundStyle(.secondary)
         }
         .padding(.vertical, 4)
+    }
+}
+
+private struct HistoryActionsMenu: View {
+    let record: SedentaryRecord
+    let correct: (CorrectionReason) -> Void
+    let restore: () -> Void
+
+    var body: some View {
+        Menu {
+            if record.isExcludedFromStats {
+                Button(action: restore) {
+                    Label("Restore to trends", systemImage: "arrow.uturn.backward")
+                }
+            } else {
+                Section("Exclude from trends") {
+                    ForEach(CorrectionReason.allCases, id: \.rawValue) { reason in
+                        Button {
+                            correct(reason)
+                        } label: {
+                            Label(reason.displayTitle, systemImage: icon(for: reason))
+                        }
+                    }
+                }
+            }
+        } label: {
+            Image(systemName: "ellipsis.circle")
+                .font(.title3)
+                .frame(width: 44, height: 44)
+                .contentShape(Rectangle())
+        }
+        .accessibilityLabel("Actions for \(StandUpFormatting.timeRange(record))")
+    }
+
+    private func icon(for reason: CorrectionReason) -> String {
+        switch reason {
+        case .watchingMovie:
+            return "film"
+        case .meeting:
+            return "person.2"
+        case .alreadyStood:
+            return "figure.stand"
+        case .other:
+            return "questionmark.circle"
+        }
     }
 }
