@@ -145,6 +145,47 @@ public struct SedentaryEngine: Equatable, Sendable {
         return SedentarySnapshot(phase: .monitoring, seatedMinutes: seatedMinutes, ignoreUntil: nil)
     }
 
+    public func reminderPlan(at now: Date, limit: Int = 60) -> ReminderPlan {
+        guard limit > 0, pauseReason == nil, activeCandidateSince == nil, let seatedSince else {
+            return .empty
+        }
+
+        let thresholdDate = seatedSince.addingTimeInterval(TimeInterval(settings.sedentaryThresholdMinutes * 60))
+        let firstReason: NotificationReason
+        let cadenceDate: Date
+        if thresholdReachedAt == nil {
+            firstReason = .thresholdReached
+            cadenceDate = thresholdDate
+        } else {
+            firstReason = .repeatReminder
+            cadenceDate = (lastReminderAt ?? thresholdDate).addingTimeInterval(
+                TimeInterval(settings.repeatReminderMinutes * 60)
+            )
+        }
+
+        let firstDeliveryDate = max(now, cadenceDate, ignoreUntil ?? cadenceDate)
+        guard let activeWindowEnd = settings.activeWindow.end(containing: now, calendar: calendar),
+              firstDeliveryDate < activeWindowEnd else {
+            return .empty
+        }
+
+        var reminders: [PlannedReminder] = []
+        var deliveryDate = firstDeliveryDate
+        while deliveryDate < activeWindowEnd, reminders.count < limit {
+            let reason = reminders.isEmpty ? firstReason : NotificationReason.repeatReminder
+            reminders.append(
+                PlannedReminder(
+                    id: "\(reason.rawValue)-\(Int(deliveryDate.timeIntervalSince1970))",
+                    deliveryDate: deliveryDate,
+                    reason: reason
+                )
+            )
+            deliveryDate = deliveryDate.addingTimeInterval(TimeInterval(settings.repeatReminderMinutes * 60))
+        }
+
+        return ReminderPlan(reminders: reminders)
+    }
+
     private mutating func evaluateReminder(at now: Date) -> EngineOutput {
         guard pauseReason == nil, let seatedSince else {
             return .empty

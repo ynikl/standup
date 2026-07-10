@@ -26,6 +26,9 @@ let checks: [(String, () throws -> Void)] = [
     ("until tomorrow resumes at next active window", checkUntilTomorrow),
     ("threshold notification fires at configured time", checkThresholdNotification),
     ("ignore window does not clear session", checkIgnoreWindow),
+    ("pre-threshold ignore never reminds early", checkPreThresholdIgnorePlan),
+    ("reminder plan stops at active-window end", checkReminderActiveWindowBoundary),
+    ("reminder plan repeats and caps pending requests", checkReminderPlanCadence),
     ("dismissed notification repeats every ten minutes", checkRepeatReminder),
     ("continuous activity clears after two minutes", checkActivityClear),
     ("tick clears continuous active movement", checkTickActivityClear),
@@ -120,6 +123,52 @@ func checkIgnoreWindow() throws {
 
     try expect(afterIgnoreWindow.shouldNotify, "notify after ignore expires")
     try expect(afterIgnoreWindow.notificationReason == .repeatReminder, "after-ignore reason should be repeat")
+}
+
+func checkPreThresholdIgnorePlan() throws {
+    var engine = SedentaryEngine(settings: .default, calendar: .standUpCheck)
+    let start = Date.standUpCheck(hour: 9, minute: 0)
+
+    _ = engine.ingest(.activity(.sedentary), at: start)
+    _ = engine.ingest(.ignore(.fifteenMinutes), at: start.adding(minutes: 5))
+
+    let plan = engine.reminderPlan(at: start.adding(minutes: 5))
+
+    try expect(
+        plan.reminders.first?.deliveryDate == start.adding(minutes: 45),
+        "ignore ending before threshold must not remind early"
+    )
+    try expect(plan.reminders.first?.reason == .thresholdReached, "first planned reminder reason")
+}
+
+func checkReminderActiveWindowBoundary() throws {
+    var engine = SedentaryEngine(settings: .default, calendar: .standUpCheck)
+    let start = Date.standUpCheck(hour: 21, minute: 30)
+
+    _ = engine.ingest(.activity(.sedentary), at: start)
+
+    let plan = engine.reminderPlan(at: start)
+
+    try expect(plan.reminders.isEmpty, "22:15 threshold is outside active hours")
+}
+
+func checkReminderPlanCadence() throws {
+    let settings = StandUpSettings(
+        sedentaryThresholdMinutes: 15,
+        activeWindow: ActiveWindow(startMinuteOfDay: 0, endMinuteOfDay: 24 * 60)
+    )
+    var engine = SedentaryEngine(settings: settings, calendar: .standUpCheck)
+    let start = Date.standUpCheck(hour: 0, minute: 0)
+
+    _ = engine.ingest(.activity(.sedentary), at: start)
+
+    let plan = engine.reminderPlan(at: start, limit: 60)
+
+    try expect(plan.reminders.count == 60, "plan should respect pending-request cap")
+    try expect(plan.reminders[0].deliveryDate == start.adding(minutes: 15), "threshold delivery")
+    try expect(plan.reminders[0].reason == .thresholdReached, "first reminder reason")
+    try expect(plan.reminders[1].deliveryDate == start.adding(minutes: 25), "repeat cadence")
+    try expect(plan.reminders[1].reason == .repeatReminder, "repeat reminder reason")
 }
 
 func checkRepeatReminder() throws {

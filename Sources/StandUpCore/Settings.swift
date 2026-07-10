@@ -61,6 +61,21 @@ public struct ActiveWindow: Codable, Equatable, Sendable {
 
         return calendar.date(byAdding: .day, value: 1, to: todayStart) ?? todayStart.addingTimeInterval(24 * 60 * 60)
     }
+
+    public func end(containing date: Date, calendar: Calendar) -> Date? {
+        guard contains(date, calendar: calendar) else {
+            return nil
+        }
+
+        let today = calendar.startOfDay(for: date)
+        let todayEnd = today.addingTimeInterval(TimeInterval(endMinuteOfDay * 60))
+        if startMinuteOfDay < endMinuteOfDay || todayEnd > date {
+            return todayEnd
+        }
+
+        return calendar.date(byAdding: .day, value: 1, to: todayEnd)
+            ?? todayEnd.addingTimeInterval(24 * 60 * 60)
+    }
 }
 
 public enum IgnoreDuration: String, CaseIterable, Codable, Equatable, Sendable {
