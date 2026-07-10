@@ -12,13 +12,18 @@ final class StandUpAppModel: ObservableObject {
     @Published var snapshot: SedentarySnapshot
     @Published var permissionState: PermissionState
     @Published var lastNotificationReason: NotificationReason?
+    @Published private(set) var operationalError: String?
 
     private var engine: SedentaryEngine
     private let storage: StandUpStorage
     private let notifier: StandUpNotificationScheduling
     private let sync: StandUpSyncing
-    private var scheduledReminderAt: Date?
+    private var lastReminderPlan: ReminderPlan?
     private var settingsUpdatedAt: Date
+    private var persistenceEnabled: Bool
+    private var persistenceError: String?
+    private var syncError: String?
+    private var notificationError: String?
 
     init(
         storage: StandUpStorage? = nil,
@@ -33,22 +38,42 @@ final class StandUpAppModel: ObservableObject {
         self.notifier = notifier
         self.sync = sync
 
-        let persisted = (try? storage.load()) ?? StandUpLocalState(
-            synchronized: StandUpDataState(
-                settings: .default,
-                settingsUpdatedAt: Date(timeIntervalSince1970: 0),
-                records: []
+        let persisted: StandUpLocalState
+        let loadError: String?
+        do {
+            persisted = try storage.load()
+            self.persistenceEnabled = true
+            loadError = nil
+        } catch {
+            persisted = StandUpLocalState(
+                synchronized: StandUpDataState(
+                    settings: .default,
+                    settingsUpdatedAt: Date(timeIntervalSince1970: 0),
+                    records: []
+                )
             )
-        )
+            self.persistenceEnabled = false
+            loadError = "Unable to load local data: \(error.localizedDescription)"
+        }
         self.settings = persisted.synchronized.settings
         self.settingsUpdatedAt = persisted.synchronized.settingsUpdatedAt
         self.records = persisted.synchronized.records.sorted { $0.thresholdReachedAt > $1.thresholdReachedAt }
         self.permissionState = .unknown
+        self.persistenceError = loadError
+        self.syncError = nil
+        self.notificationError = nil
+        self.operationalError = loadError
         self.engine = SedentaryEngine(settings: persisted.synchronized.settings, sessionState: persisted.session)
         self.snapshot = engine.snapshot(at: now)
 
         self.sync.onReceive = { [weak self] state in
+            self?.syncError = nil
+            self?.refreshOperationalError()
             self?.merge(state)
+        }
+        self.sync.onError = { [weak self] error in
+            self?.syncError = "Unable to receive synced data: \(error.localizedDescription)"
+            self?.refreshOperationalError()
         }
         self.sync.activate()
     }
@@ -60,17 +85,10 @@ final class StandUpAppModel: ObservableObject {
     func ingest(activity: ActivitySignal, now: Date = Date()) {
         permissionState.motionAllowed = activity == .unavailable ? false : true
         apply(engine.ingest(.activity(activity), at: now), at: now)
-
-        if activity == .active || activity == .unavailable {
-            cancelScheduledReminder()
-        } else {
-            scheduleNextReminderIfNeeded(now: now)
-        }
     }
 
     func ignore(_ duration: IgnoreDuration, now: Date = Date()) {
         apply(engine.ingest(.ignore(duration), at: now), at: now)
-        scheduleNextReminderIfNeeded(now: now)
     }
 
     func updateThreshold(minutes: Int, now: Date = Date()) {
@@ -82,7 +100,9 @@ final class StandUpAppModel: ObservableObject {
         )
         settingsUpdatedAt = now
         engine.update(settings: settings)
-        persist(synchronize: true)
+        snapshot = engine.snapshot(at: now)
+        persist(synchronize: true, recoverStorage: true)
+        reconcileReminders(now: now)
     }
 
     func updateActiveWindow(startHour: Int, endHour: Int, now: Date = Date()) {
@@ -94,7 +114,9 @@ final class StandUpAppModel: ObservableObject {
         )
         settingsUpdatedAt = now
         engine.update(settings: settings)
-        persist(synchronize: true)
+        snapshot = engine.snapshot(at: now)
+        persist(synchronize: true, recoverStorage: true)
+        reconcileReminders(now: now)
     }
 
     func correct(recordID: SedentaryRecord.ID, reason: CorrectionReason, now: Date = Date()) {
@@ -108,7 +130,7 @@ final class StandUpAppModel: ObservableObject {
             corrected.modifiedAt = now
             return corrected
         }
-        persist(synchronize: true)
+        persist(synchronize: true, recoverStorage: true)
     }
 
     func restore(recordID: SedentaryRecord.ID, now: Date = Date()) {
@@ -122,7 +144,7 @@ final class StandUpAppModel: ObservableObject {
             restored.modifiedAt = now
             return restored
         }
-        persist(synchronize: true)
+        persist(synchronize: true, recoverStorage: true)
     }
 
     func requestPermissions() async {
@@ -145,16 +167,7 @@ final class StandUpAppModel: ObservableObject {
         lastNotificationReason = output.notificationReason
         snapshot = engine.snapshot(at: now)
         persist(synchronize: !output.endedRecords.isEmpty)
-
-        guard output.shouldNotify else {
-            return
-        }
-
-        Task {
-            await notifier.scheduleSedentaryReminder(reason: output.notificationReason, seatedMinutes: snapshot.seatedMinutes)
-        }
-        scheduledReminderAt = nil
-        scheduleNextReminderIfNeeded(now: now)
+        reconcileReminders(now: now, immediateReason: output.shouldNotify ? output.notificationReason : nil)
     }
 
     private var synchronizedState: StandUpDataState {
@@ -165,11 +178,36 @@ final class StandUpAppModel: ObservableObject {
         )
     }
 
-    private func persist(synchronize: Bool = false) {
+    private func persist(synchronize: Bool = false, recoverStorage: Bool = false) {
+        if recoverStorage {
+            persistenceEnabled = true
+        }
+
+        guard persistenceEnabled else {
+            return
+        }
+
         let synchronizedState = synchronizedState
-        try? storage.save(StandUpLocalState(synchronized: synchronizedState, session: engine.sessionState))
+        do {
+            try storage.save(StandUpLocalState(synchronized: synchronizedState, session: engine.sessionState))
+            persistenceError = nil
+            refreshOperationalError()
+        } catch {
+            persistenceEnabled = false
+            persistenceError = "Unable to save local data: \(error.localizedDescription)"
+            refreshOperationalError()
+            return
+        }
+
         if synchronize {
-            sync.publish(synchronizedState)
+            do {
+                try sync.publish(synchronizedState)
+                syncError = nil
+                refreshOperationalError()
+            } catch {
+                syncError = "Unable to sync data: \(error.localizedDescription)"
+                refreshOperationalError()
+            }
         }
     }
 
@@ -179,56 +217,44 @@ final class StandUpAppModel: ObservableObject {
         settingsUpdatedAt = merged.settingsUpdatedAt
         records = merged.records
         engine.update(settings: settings)
+        snapshot = engine.snapshot(at: Date())
         persist()
+        reconcileReminders(now: Date())
     }
 
-    private func scheduleNextReminderIfNeeded(now: Date) {
-        guard let seatedMinutes = snapshot.seatedMinutes else {
-            cancelScheduledReminder()
+    private func reconcileReminders(now: Date, immediateReason: NotificationReason? = nil) {
+        var plan = engine.reminderPlan(at: now)
+        if let immediateReason {
+            plan.reminders.insert(
+                PlannedReminder(
+                    id: "immediate-\(immediateReason.rawValue)-\(Int(now.timeIntervalSince1970))",
+                    deliveryDate: now,
+                    reason: immediateReason
+                ),
+                at: 0
+            )
+        }
+
+        guard plan != lastReminderPlan else {
             return
         }
 
-        let nextDate: Date?
-        let reason: NotificationReason
-        switch snapshot.phase {
-        case .monitoring:
-            nextDate = now.addingTimeInterval(TimeInterval(max(1, settings.sedentaryThresholdMinutes - seatedMinutes) * 60))
-            reason = .thresholdReached
-        case .overdue:
-            nextDate = now.addingTimeInterval(TimeInterval(settings.repeatReminderMinutes * 60))
-            reason = .repeatReminder
-        case .ignored(let until):
-            nextDate = until
-            reason = .repeatReminder
-        case .paused:
-            nextDate = nil
-            reason = .repeatReminder
-        }
-
-        guard let nextDate else {
-            cancelScheduledReminder()
-            return
-        }
-
-        if let scheduledReminderAt, abs(scheduledReminderAt.timeIntervalSince(nextDate)) < 30 {
-            return
-        }
-
-        scheduledReminderAt = nextDate
+        lastReminderPlan = plan
         Task {
-            await notifier.scheduleSedentaryReminder(at: nextDate, reason: reason)
+            do {
+                try await notifier.replaceSedentaryReminders(with: plan)
+                notificationError = nil
+                refreshOperationalError()
+            } catch {
+                lastReminderPlan = nil
+                notificationError = "Unable to update reminders: \(error.localizedDescription)"
+                refreshOperationalError()
+            }
         }
     }
 
-    private func cancelScheduledReminder() {
-        guard scheduledReminderAt != nil else {
-            return
-        }
-
-        scheduledReminderAt = nil
-        Task {
-            await notifier.cancelSedentaryReminders()
-        }
+    private func refreshOperationalError() {
+        operationalError = persistenceError ?? syncError ?? notificationError
     }
 }
 

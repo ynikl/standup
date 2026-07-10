@@ -8,6 +8,8 @@ StandUp is a local-first iPhone and Apple Watch app for automatic sedentary remi
 - Users can set the sedentary threshold from 15 to 120 minutes.
 - Reminders repeat every 10 minutes after the threshold until the user stands or skips.
 - Standing or walking for 2 continuous minutes resets the timer.
+- In-progress sessions are restored after a local app restart.
+- A bounded reminder series is scheduled only within active hours.
 - iPhone shows overdue sitting intervals, corrections, and 7/30-day trends.
 - Data stays local. There is no account system or server upload.
 
@@ -24,6 +26,7 @@ StandUp is a local-first iPhone and Apple Watch app for automatic sedentary remi
 
 ```sh
 swift run StandUpCoreChecks
+Checks/run-shared-checks.sh
 swift build
 ```
 

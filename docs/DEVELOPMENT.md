@@ -8,6 +8,7 @@ This workspace currently has Swift command-line tooling, but no full Xcode insta
 
 ```sh
 swift run StandUpCoreChecks
+Checks/run-shared-checks.sh
 swift build
 ```
 
@@ -24,6 +25,9 @@ The check runner covers:
 - active-hours pause behavior
 - daily summaries
 - 7-day and 30-day trend windows
+- local session restoration and legacy JSON migration
+- bounded reminder planning within active hours
+- shared app-model persistence and notification reconciliation
 
 ## Generate Xcode Project
 
@@ -51,3 +55,5 @@ After opening the project:
 - History appears on iPhone with correct intervals and overage minutes.
 - Excluding a history item removes it from trend stats.
 - A full day of watch use has acceptable battery impact.
+
+The code pre-schedules reminders so timer delivery does not depend on a foreground minute tick. Core Motion delivery while the watch app is suspended still requires real-device validation; the command-line checks do not prove watchOS background execution.
