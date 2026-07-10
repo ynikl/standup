@@ -43,7 +43,13 @@ struct StandUpSharedChecks {
         print("PASS surfaces sync failure")
         try checkReportsInvalidSyncPayload()
         print("PASS reports invalid sync payload")
-        print("\nAll 8 shared checks passed")
+        try await checkLatestReminderPlanWins()
+        print("PASS latest reminder plan wins")
+        try await checkThresholdTickPreservesPlannedReminder()
+        print("PASS threshold tick preserves planned reminder")
+        try checkReportsSessionActivationFailure()
+        print("PASS reports session activation failure")
+        print("\nAll 11 shared checks passed")
     }
 
     private static func checkRestoresPersistedSession() throws {
@@ -135,7 +141,7 @@ struct StandUpSharedChecks {
         )
 
         model.ingest(activity: .sedentary, now: now)
-        await Task.yield()
+        await model.waitForReminderReconciliation()
 
         let plan = try require(notifier.plans.last, "reconciled reminder plan")
         try expect(
@@ -158,7 +164,7 @@ struct StandUpSharedChecks {
         )
 
         model.ingest(activity: .sedentary, now: now)
-        await Task.yield()
+        await model.waitForReminderReconciliation()
 
         try expect(
             model.operationalError?.contains("Unable to update reminders") == true,
@@ -181,7 +187,7 @@ struct StandUpSharedChecks {
             "load failure should be visible"
         )
         model.refresh(now: now)
-        await Task.yield()
+        await model.waitForReminderReconciliation()
         try expect(storage.saveCount == 0, "refresh must not overwrite unreadable storage")
         try expect(
             model.operationalError?.contains("Unable to load local data") == true,
@@ -206,7 +212,7 @@ struct StandUpSharedChecks {
         )
 
         model.updateThreshold(minutes: 60, now: now.addingTimeInterval(1))
-        await Task.yield()
+        await model.waitForReminderReconciliation()
 
         try expect(
             model.operationalError?.contains("Unable to sync data") == true,
@@ -224,6 +230,68 @@ struct StandUpSharedChecks {
         bridge.receive(Data("invalid-state".utf8))
 
         try expect(receivedError, "invalid synchronization payload should report an error")
+    }
+
+    private static func checkLatestReminderPlanWins() async throws {
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+        let settings = StandUpSettings(
+            activeWindow: ActiveWindow(startMinuteOfDay: 0, endMinuteOfDay: 24 * 60)
+        )
+        let synchronized = StandUpDataState(settings: settings, settingsUpdatedAt: now, records: [])
+        let notifier = SlowFirstNotifier()
+        let model = StandUpAppModel(
+            storage: MemoryStorage(state: StandUpLocalState(synchronized: synchronized)),
+            notifier: notifier,
+            sync: MemorySync(),
+            now: now
+        )
+
+        model.ingest(activity: .sedentary, now: now)
+        await notifier.waitUntilFirstCallStarts()
+        model.ingest(activity: .active, now: now.addingTimeInterval(1))
+        await model.waitForReminderReconciliation()
+
+        try expect(notifier.completedPlans.last == .empty, "latest empty plan should be applied last")
+    }
+
+    private static func checkThresholdTickPreservesPlannedReminder() async throws {
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+        let settings = StandUpSettings(
+            activeWindow: ActiveWindow(startMinuteOfDay: 0, endMinuteOfDay: 24 * 60)
+        )
+        let synchronized = StandUpDataState(settings: settings, settingsUpdatedAt: now, records: [])
+        let notifier = RecordingNotifier()
+        let model = StandUpAppModel(
+            storage: MemoryStorage(state: StandUpLocalState(synchronized: synchronized)),
+            notifier: notifier,
+            sync: MemorySync(),
+            now: now
+        )
+
+        model.ingest(activity: .sedentary, now: now)
+        await model.waitForReminderReconciliation()
+        model.refresh(now: now.addingTimeInterval(45 * 60))
+        await model.waitForReminderReconciliation()
+
+        try expect(notifier.plans.count == 1, "threshold tick should not replace the pending plan")
+        let plan = try require(notifier.plans.last, "initial reminder plan")
+        try expect(
+            plan.reminders.first?.reason == .thresholdReached,
+            "pending threshold reminder should be preserved"
+        )
+        try expect(plan.reminders.count <= 60, "adapter plan should preserve the 60 request cap")
+    }
+
+    private static func checkReportsSessionActivationFailure() throws {
+        let bridge = WatchConnectivityStandUpBridge()
+        var receivedError = false
+        bridge.onError = { _ in
+            receivedError = true
+        }
+
+        bridge.handleActivation(error: ExpectedSyncError())
+
+        try expect(receivedError, "session activation failure should be reported")
     }
 }
 
@@ -288,6 +356,42 @@ private struct FailingNotifier: StandUpNotificationScheduling {
     }
 
     func cancelSedentaryReminders() async {}
+}
+
+@MainActor
+private final class SlowFirstNotifier: StandUpNotificationScheduling {
+    var completedPlans: [ReminderPlan] = []
+
+    private var firstCallStarted = false
+    private var firstCallWaiters: [CheckedContinuation<Void, Never>] = []
+
+    func requestAuthorization() async throws -> Bool { true }
+
+    func replaceSedentaryReminders(with plan: ReminderPlan) async throws {
+        if !firstCallStarted {
+            firstCallStarted = true
+            let waiters = firstCallWaiters
+            firstCallWaiters.removeAll()
+            waiters.forEach { $0.resume() }
+            do {
+                try await Task.sleep(for: .milliseconds(20))
+            } catch {
+                // Cancellation is expected when a newer reminder plan supersedes this one.
+            }
+        }
+        completedPlans.append(plan)
+    }
+
+    func cancelSedentaryReminders() async {}
+
+    func waitUntilFirstCallStarts() async {
+        guard !firstCallStarted else {
+            return
+        }
+        await withCheckedContinuation { continuation in
+            firstCallWaiters.append(continuation)
+        }
+    }
 }
 
 @MainActor

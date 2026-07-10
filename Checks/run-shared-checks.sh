@@ -4,6 +4,7 @@ set -eu
 
 ROOT=$(CDPATH= cd -- "$(dirname "$0")/.." && pwd)
 BUILD_DIR="$ROOT/.build/shared-checks"
+TARGET="$(uname -m)-apple-macosx13.0"
 
 mkdir -p "$BUILD_DIR"
 
@@ -11,14 +12,16 @@ xcrun swiftc \
     -emit-library \
     -emit-module \
     -module-name StandUpCore \
-    -target arm64-apple-macosx13.0 \
+    -swift-version 6 \
+    -target "$TARGET" \
     -emit-module-path "$BUILD_DIR/StandUpCore.swiftmodule" \
     "$ROOT"/Sources/StandUpCore/*.swift \
     -o "$BUILD_DIR/libStandUpCore.dylib"
 
 xcrun swiftc \
     -parse-as-library \
-    -target arm64-apple-macosx13.0 \
+    -swift-version 6 \
+    -target "$TARGET" \
     -I "$BUILD_DIR" \
     -L "$BUILD_DIR" \
     -lStandUpCore \

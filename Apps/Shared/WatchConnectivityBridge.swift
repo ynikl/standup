@@ -57,11 +57,25 @@ final class WatchConnectivityStandUpBridge: NSObject, StandUpSyncing {
             onError?(error)
         }
     }
+
+    func handleActivation(error: Error?) {
+        if let error {
+            onError?(error)
+        }
+    }
 }
 
 #if canImport(WatchConnectivity)
 extension WatchConnectivityStandUpBridge: WCSessionDelegate {
-    nonisolated func session(_ session: WCSession, activationDidCompleteWith activationState: WCSessionActivationState, error: Error?) {}
+    nonisolated func session(
+        _ session: WCSession,
+        activationDidCompleteWith activationState: WCSessionActivationState,
+        error: Error?
+    ) {
+        Task { @MainActor in
+            self.handleActivation(error: error)
+        }
+    }
 
     nonisolated func session(_ session: WCSession, didReceiveApplicationContext applicationContext: [String: Any]) {
         guard let data = applicationContext["standupState"] as? Data else {

@@ -53,13 +53,14 @@ public struct ActiveWindow: Codable, Equatable, Sendable {
     }
 
     public func nextStart(after date: Date, calendar: Calendar) -> Date {
-        let today = calendar.startOfDay(for: date)
-        let todayStart = today.addingTimeInterval(TimeInterval(startMinuteOfDay * 60))
+        let todayStart = start(on: date, calendar: calendar)
         if todayStart > date {
             return todayStart
         }
 
-        return calendar.date(byAdding: .day, value: 1, to: todayStart) ?? todayStart.addingTimeInterval(24 * 60 * 60)
+        let tomorrow = calendar.date(byAdding: .day, value: 1, to: calendar.startOfDay(for: date))
+            ?? date.addingTimeInterval(24 * 60 * 60)
+        return start(on: tomorrow, calendar: calendar)
     }
 
     public func end(containing date: Date, calendar: Calendar) -> Date? {
@@ -67,14 +68,35 @@ public struct ActiveWindow: Codable, Equatable, Sendable {
             return nil
         }
 
-        let today = calendar.startOfDay(for: date)
-        let todayEnd = today.addingTimeInterval(TimeInterval(endMinuteOfDay * 60))
+        let todayEnd = wallClockDate(on: date, minuteOfDay: endMinuteOfDay, calendar: calendar)
         if startMinuteOfDay < endMinuteOfDay || todayEnd > date {
             return todayEnd
         }
 
-        return calendar.date(byAdding: .day, value: 1, to: todayEnd)
-            ?? todayEnd.addingTimeInterval(24 * 60 * 60)
+        let tomorrow = calendar.date(byAdding: .day, value: 1, to: calendar.startOfDay(for: date))
+            ?? date.addingTimeInterval(24 * 60 * 60)
+        return wallClockDate(on: tomorrow, minuteOfDay: endMinuteOfDay, calendar: calendar)
+    }
+
+    public func start(on date: Date, calendar: Calendar) -> Date {
+        wallClockDate(on: date, minuteOfDay: startMinuteOfDay, calendar: calendar)
+    }
+
+    private func wallClockDate(on date: Date, minuteOfDay: Int, calendar: Calendar) -> Date {
+        let dayOffset = minuteOfDay / (24 * 60)
+        let normalizedMinute = minuteOfDay % (24 * 60)
+        let baseDay = calendar.date(
+            byAdding: .day,
+            value: dayOffset,
+            to: calendar.startOfDay(for: date)
+        ) ?? calendar.startOfDay(for: date)
+
+        return calendar.date(
+            bySettingHour: normalizedMinute / 60,
+            minute: normalizedMinute % 60,
+            second: 0,
+            of: baseDay
+        ) ?? baseDay
     }
 }
 
@@ -121,6 +143,6 @@ public enum IgnoreDuration: String, CaseIterable, Codable, Equatable, Sendable {
         }
 
         let tomorrow = calendar.date(byAdding: .day, value: 1, to: calendar.startOfDay(for: date)) ?? date.addingTimeInterval(24 * 60 * 60)
-        return tomorrow.addingTimeInterval(TimeInterval(settings.activeWindow.startMinuteOfDay * 60))
+        return settings.activeWindow.start(on: tomorrow, calendar: calendar)
     }
 }

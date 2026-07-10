@@ -22,17 +22,20 @@ public struct StandUpDataState: Codable, Equatable, Sendable {
             mergedSettingsUpdatedAt = settingsUpdatedAt
         }
 
-        var recordsByID = Dictionary(uniqueKeysWithValues: records.map { ($0.id, $0) })
-        for record in incoming.records {
+        var recordsByID: [SedentaryRecord.ID: SedentaryRecord] = [:]
+        func mergeRecord(_ record: SedentaryRecord) {
             guard let existing = recordsByID[record.id] else {
                 recordsByID[record.id] = record
-                continue
+                return
             }
 
             if record.modifiedAt > existing.modifiedAt {
                 recordsByID[record.id] = record
             }
         }
+
+        records.forEach(mergeRecord)
+        incoming.records.forEach(mergeRecord)
 
         return StandUpDataState(
             settings: mergedSettings,

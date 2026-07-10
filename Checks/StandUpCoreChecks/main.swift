@@ -34,10 +34,13 @@ let checks: [(String, () throws -> Void)] = [
     ("tick clears continuous active movement", checkTickActivityClear),
     ("sedentary movement interrupts active clear", checkInterruptedActivityClear),
     ("session state survives encoding and restoration", checkSessionRestoration),
+    ("invalid restored sessions are discarded", checkInvalidSessionRestoration),
     ("sensor unavailable pauses without backfilling", checkSensorUnavailable),
     ("outside active window does not notify", checkActiveWindow),
+    ("active-window end follows wall-clock time across DST", checkActiveWindowDST),
     ("daily summaries exclude corrected records", checkDailySummaries),
     ("newer synchronized revisions win", checkSynchronizedMerge),
+    ("duplicate local records merge by revision", checkDuplicateLocalRecordMerge),
     ("legacy records default modification time", checkLegacyRecordRevision),
     ("legacy local state decodes without a session", checkLegacyLocalState),
     ("trend windows include exact calendar days", checkTrendWindow)
@@ -245,13 +248,49 @@ func checkSessionRestoration() throws {
 
     let data = try JSONEncoder().encode(engine.sessionState)
     let state = try JSONDecoder().decode(SedentarySessionState.self, from: data)
-    let restored = SedentaryEngine(settings: .default, calendar: .standUpCheck, sessionState: state)
+    let restored = SedentaryEngine(
+        settings: .default,
+        calendar: .standUpCheck,
+        sessionState: state,
+        restoredAt: start.adding(minutes: 50)
+    )
 
     try expect(
         restored.snapshot(at: start.adding(minutes: 50)).phase == .ignored(until: start.adding(minutes: 76)),
         "restored ignore window"
     )
     try expect(restored.snapshot(at: start.adding(minutes: 50)).seatedMinutes == 50, "restored seated duration")
+}
+
+func checkInvalidSessionRestoration() throws {
+    let now = Date.standUpCheck(hour: 10, minute: 0)
+    let futureState = SedentarySessionState(
+        seatedSince: now.adding(minutes: 10),
+        latestActivity: .sedentary
+    )
+    let futureEngine = SedentaryEngine(
+        settings: .default,
+        calendar: .standUpCheck,
+        sessionState: futureState,
+        restoredAt: now
+    )
+    try expect(futureEngine.snapshot(at: now).seatedMinutes == nil, "future session should be discarded")
+
+    let inconsistentState = SedentarySessionState(
+        seatedSince: now.adding(minutes: -30),
+        activeCandidateSince: now.adding(minutes: -1),
+        latestActivity: .sedentary
+    )
+    let inconsistentEngine = SedentaryEngine(
+        settings: .default,
+        calendar: .standUpCheck,
+        sessionState: inconsistentState,
+        restoredAt: now
+    )
+    try expect(
+        inconsistentEngine.snapshot(at: now).seatedMinutes == nil,
+        "inconsistent active candidate should be discarded"
+    )
 }
 
 func checkSensorUnavailable() throws {
@@ -275,6 +314,64 @@ func checkActiveWindow() throws {
 
     try expect(output.shouldNotify == false, "outside active window should not notify")
     try expect(engine.snapshot(at: evening.adding(minutes: 90)).phase == .paused(.outsideActiveWindow), "outside active window pause")
+}
+
+func checkActiveWindowDST() throws {
+    var calendar = Calendar(identifier: .gregorian)
+    calendar.timeZone = try require(TimeZone(identifier: "America/Los_Angeles"), "DST time zone")
+    let date = try require(
+        DateComponents(
+            calendar: calendar,
+            timeZone: calendar.timeZone,
+            year: 2026,
+            month: 3,
+            day: 8,
+            hour: 10
+        ).date,
+        "DST test date"
+    )
+
+    let end = try require(ActiveWindow.default.end(containing: date, calendar: calendar), "active-window end")
+    let components = calendar.dateComponents([.day, .hour, .minute], from: end)
+
+    try expect(components.day == 8, "active window should end on the same local day")
+    try expect(components.hour == 22 && components.minute == 0, "active window should end at local 22:00")
+
+    let morning = try require(
+        DateComponents(
+            calendar: calendar,
+            timeZone: calendar.timeZone,
+            year: 2026,
+            month: 3,
+            day: 8,
+            hour: 8
+        ).date,
+        "DST morning"
+    )
+    let nextStart = ActiveWindow.default.nextStart(after: morning, calendar: calendar)
+    try expect(calendar.component(.hour, from: nextStart) == 9, "next start should remain at local 09:00")
+
+    let previousEvening = try require(
+        DateComponents(
+            calendar: calendar,
+            timeZone: calendar.timeZone,
+            year: 2026,
+            month: 3,
+            day: 7,
+            hour: 20
+        ).date,
+        "evening before DST"
+    )
+    let ignoreEnd = IgnoreDuration.untilTomorrow.endDate(
+        startedAt: previousEvening,
+        settings: .default,
+        calendar: calendar
+    )
+    let ignoreComponents = calendar.dateComponents([.day, .hour], from: ignoreEnd)
+    try expect(
+        ignoreComponents.day == 8 && ignoreComponents.hour == 9,
+        "until tomorrow should resume at local 09:00"
+    )
 }
 
 func checkDailySummaries() throws {
@@ -349,6 +446,37 @@ func checkSynchronizedMerge() throws {
     try expect(merged.settings == remoteSettings, "newer settings should win")
     try expect(merged.records.first?.correction == .excluded(reason: .meeting), "newer correction should win")
     try expect(remote.merging(local).settings == remoteSettings, "stale settings should be ignored")
+}
+
+func checkDuplicateLocalRecordMerge() throws {
+    let start = Date.standUpCheck(hour: 9, minute: 0)
+    let id = UUID(uuidString: "00000000-0000-0000-0000-000000000011")!
+    let older = SedentaryRecord(
+        id: id,
+        sedentaryStartedAt: start,
+        thresholdReachedAt: start.adding(minutes: 45),
+        endedAt: start.adding(minutes: 60),
+        endReason: .stoodUp,
+        ignoreEvents: [],
+        modifiedAt: start.adding(minutes: 60)
+    )
+    var newer = older
+    newer.correction = .excluded(reason: .alreadyStood)
+    newer.modifiedAt = start.adding(minutes: 61)
+    let local = StandUpDataState(
+        settings: .default,
+        settingsUpdatedAt: start,
+        records: [older, newer]
+    )
+    let incoming = StandUpDataState(settings: .default, settingsUpdatedAt: start, records: [])
+
+    let merged = local.merging(incoming)
+
+    try expect(merged.records.count == 1, "duplicate UUIDs should be collapsed")
+    try expect(
+        merged.records.first?.correction == .excluded(reason: .alreadyStood),
+        "newest duplicate should win"
+    )
 }
 
 func checkLegacyRecordRevision() throws {

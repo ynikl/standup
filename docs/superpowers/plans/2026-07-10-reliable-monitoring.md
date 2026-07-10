@@ -8,6 +8,8 @@
 
 **Tech Stack:** Swift 6, Foundation, Swift Package Manager, UserNotifications, WatchConnectivity
 
+**Environment Note:** The selected Command Line Tools installation cannot discover XCTest or Swift Testing suites. Shared-layer behavior is compiled in Swift 6 mode and executed through `Checks/run-shared-checks.sh`; this replaces the `swift test` commands and `StandUpSharedTests` target described below.
+
 ---
 
 ### Task 1: Restorable Session And Tick-Based Activity Clear
@@ -456,7 +458,7 @@ In `StandUpAppModel`:
 
 - [ ] **Step 4: Run core verification**
 
-Run: `swift test && swift run StandUpCoreChecks && swift build`
+Run: `Checks/run-shared-checks.sh && swift run StandUpCoreChecks && swift build`
 
 Expected: all checks pass and the Swift package builds without warnings or errors.
 

@@ -10,6 +10,7 @@ public struct SedentarySessionState: Codable, Equatable, Sendable {
     public var ignoreUntil: Date?
     public var ignoreEvents: [IgnoreEvent]
     public var pauseReason: PauseReason?
+    public var latestActivity: ActivitySignal?
 
     public init(
         seatedSince: Date? = nil,
@@ -18,7 +19,8 @@ public struct SedentarySessionState: Codable, Equatable, Sendable {
         lastReminderAt: Date? = nil,
         ignoreUntil: Date? = nil,
         ignoreEvents: [IgnoreEvent] = [],
-        pauseReason: PauseReason? = nil
+        pauseReason: PauseReason? = nil,
+        latestActivity: ActivitySignal? = nil
     ) {
         self.seatedSince = seatedSince
         self.thresholdReachedAt = thresholdReachedAt
@@ -27,6 +29,31 @@ public struct SedentarySessionState: Codable, Equatable, Sendable {
         self.ignoreUntil = ignoreUntil
         self.ignoreEvents = ignoreEvents
         self.pauseReason = pauseReason
+        self.latestActivity = latestActivity
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case seatedSince
+        case thresholdReachedAt
+        case activeCandidateSince
+        case lastReminderAt
+        case ignoreUntil
+        case ignoreEvents
+        case pauseReason
+        case latestActivity
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        seatedSince = try container.decodeIfPresent(Date.self, forKey: .seatedSince)
+        thresholdReachedAt = try container.decodeIfPresent(Date.self, forKey: .thresholdReachedAt)
+        activeCandidateSince = try container.decodeIfPresent(Date.self, forKey: .activeCandidateSince)
+        lastReminderAt = try container.decodeIfPresent(Date.self, forKey: .lastReminderAt)
+        ignoreUntil = try container.decodeIfPresent(Date.self, forKey: .ignoreUntil)
+        ignoreEvents = try container.decodeIfPresent([IgnoreEvent].self, forKey: .ignoreEvents) ?? []
+        pauseReason = try container.decodeIfPresent(PauseReason.self, forKey: .pauseReason)
+        latestActivity = try container.decodeIfPresent(ActivitySignal.self, forKey: .latestActivity)
+            ?? (activeCandidateSince != nil ? .active : seatedSince != nil ? .sedentary : nil)
     }
 }
 
@@ -41,21 +68,30 @@ public struct SedentaryEngine: Equatable, Sendable {
     private var ignoreUntil: Date?
     private var ignoreEvents: [IgnoreEvent]
     private var pauseReason: PauseReason?
+    private var latestActivity: ActivitySignal?
 
     public init(
         settings: StandUpSettings,
         calendar: Calendar = .current,
-        sessionState: SedentarySessionState = .empty
+        sessionState: SedentarySessionState = .empty,
+        restoredAt: Date = Date()
     ) {
         self.settings = settings
         self.calendar = calendar
-        self.seatedSince = sessionState.seatedSince
-        self.thresholdReachedAt = sessionState.thresholdReachedAt
-        self.activeCandidateSince = sessionState.activeCandidateSince
-        self.lastReminderAt = sessionState.lastReminderAt
-        self.ignoreUntil = sessionState.ignoreUntil
-        self.ignoreEvents = sessionState.ignoreEvents
-        self.pauseReason = sessionState.pauseReason
+        let restoredState = Self.isValid(
+            sessionState,
+            settings: settings,
+            calendar: calendar,
+            restoredAt: restoredAt
+        ) ? sessionState : .empty
+        self.seatedSince = restoredState.seatedSince
+        self.thresholdReachedAt = restoredState.thresholdReachedAt
+        self.activeCandidateSince = restoredState.activeCandidateSince
+        self.lastReminderAt = restoredState.lastReminderAt
+        self.ignoreUntil = restoredState.ignoreUntil
+        self.ignoreEvents = restoredState.ignoreEvents
+        self.pauseReason = restoredState.pauseReason
+        self.latestActivity = restoredState.latestActivity
     }
 
     public var sessionState: SedentarySessionState {
@@ -66,7 +102,8 @@ public struct SedentaryEngine: Equatable, Sendable {
             lastReminderAt: lastReminderAt,
             ignoreUntil: ignoreUntil,
             ignoreEvents: ignoreEvents,
-            pauseReason: pauseReason
+            pauseReason: pauseReason,
+            latestActivity: latestActivity
         )
     }
 
@@ -89,6 +126,7 @@ public struct SedentaryEngine: Equatable, Sendable {
         case .activity(let activity):
             switch activity {
             case .sedentary:
+                latestActivity = .sedentary
                 pauseReason = nil
                 activeCandidateSince = nil
                 if seatedSince == nil {
@@ -97,6 +135,7 @@ public struct SedentaryEngine: Equatable, Sendable {
                 return evaluateReminder(at: now)
 
             case .active:
+                latestActivity = .active
                 pauseReason = nil
                 if activeCandidateSince == nil {
                     activeCandidateSince = now
@@ -110,6 +149,7 @@ public struct SedentaryEngine: Equatable, Sendable {
                 return .empty
 
             case .unavailable:
+                latestActivity = .unavailable
                 return pause(.sensorUnavailable, at: now)
             }
 
@@ -218,7 +258,7 @@ public struct SedentaryEngine: Equatable, Sendable {
     }
 
     private mutating func evaluateActiveClear(at now: Date) -> [SedentaryRecord]? {
-        guard let activeCandidateSince else {
+        guard latestActivity == .active, let activeCandidateSince else {
             return nil
         }
 
@@ -271,6 +311,71 @@ public struct SedentaryEngine: Equatable, Sendable {
         lastReminderAt = nil
         ignoreUntil = nil
         ignoreEvents = []
+        latestActivity = nil
+    }
+
+    private static func isValid(
+        _ state: SedentarySessionState,
+        settings: StandUpSettings,
+        calendar: Calendar,
+        restoredAt: Date
+    ) -> Bool {
+        if let seatedSince = state.seatedSince {
+            guard seatedSince <= restoredAt,
+                  settings.activeWindow.contains(seatedSince, calendar: calendar),
+                  settings.activeWindow.contains(restoredAt, calendar: calendar),
+                  let windowEnd = settings.activeWindow.end(containing: seatedSince, calendar: calendar),
+                  restoredAt < windowEnd else {
+                return false
+            }
+        } else if state.thresholdReachedAt != nil
+            || state.activeCandidateSince != nil
+            || state.lastReminderAt != nil
+            || !state.ignoreEvents.isEmpty {
+            return false
+        }
+
+        if let thresholdReachedAt = state.thresholdReachedAt {
+            guard let seatedSince = state.seatedSince,
+                  thresholdReachedAt >= seatedSince,
+                  thresholdReachedAt <= restoredAt else {
+                return false
+            }
+        }
+
+        if let lastReminderAt = state.lastReminderAt {
+            guard let thresholdReachedAt = state.thresholdReachedAt,
+                  lastReminderAt >= thresholdReachedAt,
+                  lastReminderAt <= restoredAt else {
+                return false
+            }
+        }
+
+        if let activeCandidateSince = state.activeCandidateSince {
+            guard let seatedSince = state.seatedSince,
+                  state.latestActivity == .active,
+                  activeCandidateSince >= seatedSince,
+                  activeCandidateSince <= restoredAt else {
+                return false
+            }
+        } else if state.latestActivity == .active {
+            return false
+        }
+
+        if state.pauseReason != nil, state.seatedSince != nil {
+            return false
+        }
+
+        for event in state.ignoreEvents {
+            guard let thresholdReachedAt = state.thresholdReachedAt,
+                  event.startedAt >= thresholdReachedAt,
+                  event.startedAt <= restoredAt,
+                  event.until >= event.startedAt else {
+                return false
+            }
+        }
+
+        return true
     }
 }
 

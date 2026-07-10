@@ -19,6 +19,8 @@ final class StandUpAppModel: ObservableObject {
     private let notifier: StandUpNotificationScheduling
     private let sync: StandUpSyncing
     private var lastReminderPlan: ReminderPlan?
+    private var reminderReconciliationTask: Task<Void, Never>?
+    private var reminderReconciliationGeneration = 0
     private var settingsUpdatedAt: Date
     private var persistenceEnabled: Bool
     private var persistenceError: String?
@@ -63,7 +65,11 @@ final class StandUpAppModel: ObservableObject {
         self.syncError = nil
         self.notificationError = nil
         self.operationalError = loadError
-        self.engine = SedentaryEngine(settings: persisted.synchronized.settings, sessionState: persisted.session)
+        self.engine = SedentaryEngine(
+            settings: persisted.synchronized.settings,
+            sessionState: persisted.session,
+            restoredAt: now
+        )
         self.snapshot = engine.snapshot(at: now)
 
         self.sync.onReceive = { [weak self] state in
@@ -79,12 +85,16 @@ final class StandUpAppModel: ObservableObject {
     }
 
     func refresh(now: Date = Date()) {
-        apply(engine.ingest(.tick, at: now), at: now)
+        if lastReminderPlan == nil {
+            reconcileReminders(now: now)
+        }
+        apply(engine.ingest(.tick, at: now), at: now, reconcilePlan: false)
     }
 
     func ingest(activity: ActivitySignal, now: Date = Date()) {
         permissionState.motionAllowed = activity == .unavailable ? false : true
-        apply(engine.ingest(.activity(activity), at: now), at: now)
+        let output = engine.ingest(.activity(activity), at: now)
+        apply(output, at: now, reconcilePlan: !output.shouldNotify)
     }
 
     func ignore(_ duration: IgnoreDuration, now: Date = Date()) {
@@ -159,7 +169,11 @@ final class StandUpAppModel: ObservableObject {
         SedentaryAnalytics.dailySummaries(records: records, endingOn: now, days: days)
     }
 
-    private func apply(_ output: EngineOutput, at now: Date) {
+    func waitForReminderReconciliation() async {
+        await reminderReconciliationTask?.value
+    }
+
+    private func apply(_ output: EngineOutput, at now: Date, reconcilePlan: Bool = true) {
         if !output.endedRecords.isEmpty {
             records = (output.endedRecords + records).deduplicatedByID()
         }
@@ -167,7 +181,9 @@ final class StandUpAppModel: ObservableObject {
         lastNotificationReason = output.notificationReason
         snapshot = engine.snapshot(at: now)
         persist(synchronize: !output.endedRecords.isEmpty)
-        reconcileReminders(now: now, immediateReason: output.shouldNotify ? output.notificationReason : nil)
+        if reconcilePlan {
+            reconcileReminders(now: now)
+        }
     }
 
     private var synchronizedState: StandUpDataState {
@@ -222,30 +238,34 @@ final class StandUpAppModel: ObservableObject {
         reconcileReminders(now: Date())
     }
 
-    private func reconcileReminders(now: Date, immediateReason: NotificationReason? = nil) {
-        var plan = engine.reminderPlan(at: now)
-        if let immediateReason {
-            plan.reminders.insert(
-                PlannedReminder(
-                    id: "immediate-\(immediateReason.rawValue)-\(Int(now.timeIntervalSince1970))",
-                    deliveryDate: now,
-                    reason: immediateReason
-                ),
-                at: 0
-            )
-        }
-
+    private func reconcileReminders(now: Date) {
+        let plan = engine.reminderPlan(at: now)
         guard plan != lastReminderPlan else {
             return
         }
 
         lastReminderPlan = plan
-        Task {
+        reminderReconciliationGeneration += 1
+        let generation = reminderReconciliationGeneration
+        let previousTask = reminderReconciliationTask
+        previousTask?.cancel()
+        reminderReconciliationTask = Task { [weak self, notifier] in
+            await previousTask?.value
+            guard !Task.isCancelled else {
+                return
+            }
+
             do {
                 try await notifier.replaceSedentaryReminders(with: plan)
+                guard let self, reminderReconciliationGeneration == generation else {
+                    return
+                }
                 notificationError = nil
                 refreshOperationalError()
             } catch {
+                guard let self, reminderReconciliationGeneration == generation else {
+                    return
+                }
                 lastReminderPlan = nil
                 notificationError = "Unable to update reminders: \(error.localizedDescription)"
                 refreshOperationalError()
