@@ -22,6 +22,7 @@ public struct SedentaryRecord: Codable, Equatable, Identifiable, Sendable {
     public var endReason: SedentaryEndReason
     public var ignoreEvents: [IgnoreEvent]
     public var correction: RecordCorrection?
+    public var modifiedAt: Date
 
     public init(
         id: UUID = UUID(),
@@ -30,7 +31,8 @@ public struct SedentaryRecord: Codable, Equatable, Identifiable, Sendable {
         endedAt: Date,
         endReason: SedentaryEndReason,
         ignoreEvents: [IgnoreEvent],
-        correction: RecordCorrection? = nil
+        correction: RecordCorrection? = nil,
+        modifiedAt: Date? = nil
     ) {
         self.id = id
         self.sedentaryStartedAt = sedentaryStartedAt
@@ -39,6 +41,30 @@ public struct SedentaryRecord: Codable, Equatable, Identifiable, Sendable {
         self.endReason = endReason
         self.ignoreEvents = ignoreEvents
         self.correction = correction
+        self.modifiedAt = modifiedAt ?? endedAt
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case id
+        case sedentaryStartedAt
+        case thresholdReachedAt
+        case endedAt
+        case endReason
+        case ignoreEvents
+        case correction
+        case modifiedAt
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(UUID.self, forKey: .id)
+        sedentaryStartedAt = try container.decode(Date.self, forKey: .sedentaryStartedAt)
+        thresholdReachedAt = try container.decode(Date.self, forKey: .thresholdReachedAt)
+        endedAt = try container.decode(Date.self, forKey: .endedAt)
+        endReason = try container.decode(SedentaryEndReason.self, forKey: .endReason)
+        ignoreEvents = try container.decode([IgnoreEvent].self, forKey: .ignoreEvents)
+        correction = try container.decodeIfPresent(RecordCorrection.self, forKey: .correction)
+        modifiedAt = try container.decodeIfPresent(Date.self, forKey: .modifiedAt) ?? endedAt
     }
 
     public var overageMinutes: Int {

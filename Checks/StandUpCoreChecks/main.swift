@@ -37,6 +37,8 @@ let checks: [(String, () throws -> Void)] = [
     ("sensor unavailable pauses without backfilling", checkSensorUnavailable),
     ("outside active window does not notify", checkActiveWindow),
     ("daily summaries exclude corrected records", checkDailySummaries),
+    ("newer synchronized revisions win", checkSynchronizedMerge),
+    ("legacy records default modification time", checkLegacyRecordRevision),
     ("trend windows include exact calendar days", checkTrendWindow)
 ]
 
@@ -315,6 +317,59 @@ func checkDailySummaries() throws {
     try expect(today.overdueCount == 2, "corrected record excluded from count")
     try expect(today.totalOverageMinutes == 100, "total overage excludes corrected record")
     try expect(today.longestContinuousSedentaryMinutes == 115, "longest continuous sedentary")
+}
+
+func checkSynchronizedMerge() throws {
+    let start = Date.standUpCheck(hour: 9, minute: 0)
+    let id = UUID(uuidString: "00000000-0000-0000-0000-000000000010")!
+    let localRecord = SedentaryRecord(
+        id: id,
+        sedentaryStartedAt: start,
+        thresholdReachedAt: start.adding(minutes: 45),
+        endedAt: start.adding(minutes: 60),
+        endReason: .stoodUp,
+        ignoreEvents: [],
+        modifiedAt: start.adding(minutes: 60)
+    )
+    var remoteRecord = localRecord
+    remoteRecord.correction = .excluded(reason: .meeting)
+    remoteRecord.modifiedAt = start.adding(minutes: 70)
+
+    let local = StandUpDataState(settings: .default, settingsUpdatedAt: start, records: [localRecord])
+    let remoteSettings = StandUpSettings(sedentaryThresholdMinutes: 60)
+    let remote = StandUpDataState(
+        settings: remoteSettings,
+        settingsUpdatedAt: start.adding(minutes: 1),
+        records: [remoteRecord]
+    )
+
+    let merged = local.merging(remote)
+
+    try expect(merged.settings == remoteSettings, "newer settings should win")
+    try expect(merged.records.first?.correction == .excluded(reason: .meeting), "newer correction should win")
+    try expect(remote.merging(local).settings == remoteSettings, "stale settings should be ignored")
+}
+
+func checkLegacyRecordRevision() throws {
+    let start = Date.standUpCheck(hour: 9, minute: 0)
+    let record = SedentaryRecord(
+        sedentaryStartedAt: start,
+        thresholdReachedAt: start.adding(minutes: 45),
+        endedAt: start.adding(minutes: 60),
+        endReason: .stoodUp,
+        ignoreEvents: []
+    )
+    let encoded = try JSONEncoder().encode(record)
+    var object = try require(
+        JSONSerialization.jsonObject(with: encoded) as? [String: Any],
+        "record JSON object"
+    )
+    object.removeValue(forKey: "modifiedAt")
+    let legacy = try JSONSerialization.data(withJSONObject: object)
+
+    let decoded = try JSONDecoder().decode(SedentaryRecord.self, from: legacy)
+
+    try expect(decoded.modifiedAt == decoded.endedAt, "legacy record should use end time as revision")
 }
 
 func checkTrendWindow() throws {
