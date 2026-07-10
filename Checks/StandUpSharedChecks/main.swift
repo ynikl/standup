@@ -33,6 +33,8 @@ struct StandUpSharedChecks {
         print("PASS persists session after activity")
         try checkPersistsOnlyStateChangingTicks()
         print("PASS persists only state-changing ticks")
+        try checkPersistsOnlyChangedSettings()
+        print("PASS persists only changed settings")
         try checkBuildsStableRequestsFromPlan()
         print("PASS builds stable requests from plan")
         try await checkReconcilesReminderPlan()
@@ -51,7 +53,7 @@ struct StandUpSharedChecks {
         print("PASS threshold tick preserves planned reminder")
         try checkReportsSessionActivationFailure()
         print("PASS reports session activation failure")
-        print("\nAll 12 shared checks passed")
+        print("\nAll 13 shared checks passed")
     }
 
     private static func checkRestoresPersistedSession() throws {
@@ -121,6 +123,34 @@ struct StandUpSharedChecks {
             storage.state.session.thresholdReachedAt == now.addingTimeInterval(45 * 60),
             "threshold transition should be recoverable"
         )
+    }
+
+    private static func checkPersistsOnlyChangedSettings() throws {
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+        let settings = StandUpSettings(
+            activeWindow: ActiveWindow(startMinuteOfDay: 0, endMinuteOfDay: 24 * 60)
+        )
+        let synchronized = StandUpDataState(settings: settings, settingsUpdatedAt: now, records: [])
+        let storage = MemoryStorage(state: StandUpLocalState(synchronized: synchronized))
+        let sync = MemorySync()
+        let model = StandUpAppModel(
+            storage: storage,
+            notifier: NoopNotifier(),
+            sync: sync,
+            now: now
+        )
+
+        model.updateThreshold(minutes: 46, now: now.addingTimeInterval(1))
+        model.updateActiveWindow(startHour: 0, endHour: 24, now: now.addingTimeInterval(2))
+
+        try expect(storage.saveCount == 0, "normalized unchanged settings should not persist")
+        try expect(sync.published.isEmpty, "normalized unchanged settings should not sync")
+
+        model.updateThreshold(minutes: 60, now: now.addingTimeInterval(3))
+
+        try expect(model.settings.sedentaryThresholdMinutes == 60, "changed threshold should update")
+        try expect(storage.saveCount == 1, "changed threshold should persist once")
+        try expect(sync.published.count == 1, "changed threshold should sync once")
     }
 
     private static func checkBuildsStableRequestsFromPlan() throws {

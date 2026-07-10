@@ -117,12 +117,16 @@ final class StandUpAppModel: ObservableObject {
     }
 
     func updateThreshold(minutes: Int, now: Date = Date()) {
-        settings = StandUpSettings(
+        let updatedSettings = StandUpSettings(
             sedentaryThresholdMinutes: minutes,
             activeClearMinutes: settings.activeClearMinutes,
             repeatReminderMinutes: settings.repeatReminderMinutes,
             activeWindow: settings.activeWindow
         )
+        guard updatedSettings != settings else {
+            return
+        }
+        settings = updatedSettings
         settingsUpdatedAt = now
         engine.update(settings: settings)
         snapshot = engine.snapshot(at: now)
@@ -131,12 +135,16 @@ final class StandUpAppModel: ObservableObject {
     }
 
     func updateActiveWindow(startHour: Int, endHour: Int, now: Date = Date()) {
-        settings = StandUpSettings(
+        let updatedSettings = StandUpSettings(
             sedentaryThresholdMinutes: settings.sedentaryThresholdMinutes,
             activeClearMinutes: settings.activeClearMinutes,
             repeatReminderMinutes: settings.repeatReminderMinutes,
             activeWindow: ActiveWindow(startMinuteOfDay: startHour * 60, endMinuteOfDay: endHour * 60)
         )
+        guard updatedSettings != settings else {
+            return
+        }
+        settings = updatedSettings
         settingsUpdatedAt = now
         engine.update(settings: settings)
         snapshot = engine.snapshot(at: now)
