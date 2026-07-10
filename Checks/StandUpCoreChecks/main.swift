@@ -28,6 +28,9 @@ let checks: [(String, () throws -> Void)] = [
     ("ignore window does not clear session", checkIgnoreWindow),
     ("dismissed notification repeats every ten minutes", checkRepeatReminder),
     ("continuous activity clears after two minutes", checkActivityClear),
+    ("tick clears continuous active movement", checkTickActivityClear),
+    ("sedentary movement interrupts active clear", checkInterruptedActivityClear),
+    ("session state survives encoding and restoration", checkSessionRestoration),
     ("sensor unavailable pauses without backfilling", checkSensorUnavailable),
     ("outside active window does not notify", checkActiveWindow),
     ("daily summaries exclude corrected records", checkDailySummaries),
@@ -151,6 +154,52 @@ func checkActivityClear() throws {
     try expect(record.endReason == .stoodUp, "end reason")
     try expect(engine.snapshot(at: start.adding(minutes: 52)).phase == .monitoring, "phase reset")
     try expect(engine.snapshot(at: start.adding(minutes: 52)).seatedMinutes == nil, "timer cleared")
+}
+
+func checkTickActivityClear() throws {
+    var engine = SedentaryEngine(settings: .default, calendar: .standUpCheck)
+    let start = Date.standUpCheck(hour: 9, minute: 0)
+
+    _ = engine.ingest(.activity(.sedentary), at: start)
+    _ = engine.ingest(.tick, at: start.adding(minutes: 45))
+    _ = engine.ingest(.activity(.active), at: start.adding(minutes: 50))
+
+    let output = engine.ingest(.tick, at: start.adding(minutes: 52))
+
+    try expect(output.endedRecords.first?.endReason == .stoodUp, "tick should finish active session")
+}
+
+func checkInterruptedActivityClear() throws {
+    var engine = SedentaryEngine(settings: .default, calendar: .standUpCheck)
+    let start = Date.standUpCheck(hour: 9, minute: 0)
+
+    _ = engine.ingest(.activity(.sedentary), at: start)
+    _ = engine.ingest(.tick, at: start.adding(minutes: 45))
+    _ = engine.ingest(.activity(.active), at: start.adding(minutes: 50))
+    _ = engine.ingest(.activity(.sedentary), at: start.adding(minutes: 51))
+
+    let output = engine.ingest(.tick, at: start.adding(minutes: 52))
+
+    try expect(output.endedRecords.isEmpty, "sedentary signal should cancel active candidate")
+}
+
+func checkSessionRestoration() throws {
+    var engine = SedentaryEngine(settings: .default, calendar: .standUpCheck)
+    let start = Date.standUpCheck(hour: 9, minute: 0)
+
+    _ = engine.ingest(.activity(.sedentary), at: start)
+    _ = engine.ingest(.tick, at: start.adding(minutes: 45))
+    _ = engine.ingest(.ignore(.thirtyMinutes), at: start.adding(minutes: 46))
+
+    let data = try JSONEncoder().encode(engine.sessionState)
+    let state = try JSONDecoder().decode(SedentarySessionState.self, from: data)
+    let restored = SedentaryEngine(settings: .default, calendar: .standUpCheck, sessionState: state)
+
+    try expect(
+        restored.snapshot(at: start.adding(minutes: 50)).phase == .ignored(until: start.adding(minutes: 76)),
+        "restored ignore window"
+    )
+    try expect(restored.snapshot(at: start.adding(minutes: 50)).seatedMinutes == 50, "restored seated duration")
 }
 
 func checkSensorUnavailable() throws {

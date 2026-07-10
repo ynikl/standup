@@ -1,5 +1,35 @@
 import Foundation
 
+public struct SedentarySessionState: Codable, Equatable, Sendable {
+    public static let empty = SedentarySessionState()
+
+    public var seatedSince: Date?
+    public var thresholdReachedAt: Date?
+    public var activeCandidateSince: Date?
+    public var lastReminderAt: Date?
+    public var ignoreUntil: Date?
+    public var ignoreEvents: [IgnoreEvent]
+    public var pauseReason: PauseReason?
+
+    public init(
+        seatedSince: Date? = nil,
+        thresholdReachedAt: Date? = nil,
+        activeCandidateSince: Date? = nil,
+        lastReminderAt: Date? = nil,
+        ignoreUntil: Date? = nil,
+        ignoreEvents: [IgnoreEvent] = [],
+        pauseReason: PauseReason? = nil
+    ) {
+        self.seatedSince = seatedSince
+        self.thresholdReachedAt = thresholdReachedAt
+        self.activeCandidateSince = activeCandidateSince
+        self.lastReminderAt = lastReminderAt
+        self.ignoreUntil = ignoreUntil
+        self.ignoreEvents = ignoreEvents
+        self.pauseReason = pauseReason
+    }
+}
+
 public struct SedentaryEngine: Equatable, Sendable {
     public private(set) var settings: StandUpSettings
 
@@ -12,10 +42,32 @@ public struct SedentaryEngine: Equatable, Sendable {
     private var ignoreEvents: [IgnoreEvent]
     private var pauseReason: PauseReason?
 
-    public init(settings: StandUpSettings, calendar: Calendar = .current) {
+    public init(
+        settings: StandUpSettings,
+        calendar: Calendar = .current,
+        sessionState: SedentarySessionState = .empty
+    ) {
         self.settings = settings
         self.calendar = calendar
-        self.ignoreEvents = []
+        self.seatedSince = sessionState.seatedSince
+        self.thresholdReachedAt = sessionState.thresholdReachedAt
+        self.activeCandidateSince = sessionState.activeCandidateSince
+        self.lastReminderAt = sessionState.lastReminderAt
+        self.ignoreUntil = sessionState.ignoreUntil
+        self.ignoreEvents = sessionState.ignoreEvents
+        self.pauseReason = sessionState.pauseReason
+    }
+
+    public var sessionState: SedentarySessionState {
+        SedentarySessionState(
+            seatedSince: seatedSince,
+            thresholdReachedAt: thresholdReachedAt,
+            activeCandidateSince: activeCandidateSince,
+            lastReminderAt: lastReminderAt,
+            ignoreUntil: ignoreUntil,
+            ignoreEvents: ignoreEvents,
+            pauseReason: pauseReason
+        )
     }
 
     public mutating func update(settings: StandUpSettings) {
@@ -29,6 +81,9 @@ public struct SedentaryEngine: Equatable, Sendable {
 
         switch event {
         case .tick:
+            if let ended = evaluateActiveClear(at: now) {
+                return EngineOutput(endedRecords: ended)
+            }
             return evaluateReminder(at: now)
 
         case .activity(let activity):
@@ -48,13 +103,7 @@ public struct SedentaryEngine: Equatable, Sendable {
                     return .empty
                 }
 
-                guard let activeCandidateSince else {
-                    return .empty
-                }
-
-                let activeMinutes = Int(now.timeIntervalSince(activeCandidateSince) / 60)
-                if activeMinutes >= settings.activeClearMinutes {
-                    let ended = finishSession(at: now, reason: .stoodUp)
+                if let ended = evaluateActiveClear(at: now) {
                     return EngineOutput(endedRecords: ended)
                 }
 
@@ -125,6 +174,19 @@ public struct SedentaryEngine: Equatable, Sendable {
 
         lastReminderAt = now
         return EngineOutput(shouldNotify: true, notificationReason: .repeatReminder)
+    }
+
+    private mutating func evaluateActiveClear(at now: Date) -> [SedentaryRecord]? {
+        guard let activeCandidateSince else {
+            return nil
+        }
+
+        let activeMinutes = Int(now.timeIntervalSince(activeCandidateSince) / 60)
+        guard activeMinutes >= settings.activeClearMinutes else {
+            return nil
+        }
+
+        return finishSession(at: now, reason: .stoodUp)
     }
 
     private mutating func pause(_ reason: PauseReason, at now: Date) -> EngineOutput {
