@@ -17,9 +17,10 @@ struct WatchRootView: View {
 
 private struct WatchStatusView: View {
     @EnvironmentObject private var model: StandUpAppModel
+    @State private var timelineStart = Date()
 
     var body: some View {
-        TimelineView(.periodic(from: .now, by: 60)) { context in
+        TimelineView(.periodic(from: timelineStart, by: 60)) { context in
             VStack(spacing: 10) {
                 Image(systemName: icon)
                     .font(.system(size: 24, weight: .bold))

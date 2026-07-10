@@ -24,5 +24,7 @@
 	<string>StandUp uses motion activity to estimate sitting and standing locally on Apple Watch.</string>
 	<key>WKApplication</key>
 	<true/>
+	<key>WKWatchOnly</key>
+	<true/>
 </dict>
 </plist>

@@ -9,6 +9,8 @@ This workspace currently has Swift command-line tooling, but no full Xcode insta
 ```sh
 swift run StandUpCoreChecks
 Checks/run-shared-checks.sh
+Checks/check-watch-timeline.sh
+Checks/check-watch-bundle-metadata.sh
 swift build
 ```
 
@@ -28,6 +30,8 @@ The check runner covers:
 - local session restoration and legacy JSON migration
 - bounded reminder planning within active hours
 - shared app-model persistence and notification reconciliation
+- stable Watch timeline scheduling across SwiftUI renders
+- standalone Watch app bundle metadata
 
 ## Generate Xcode Project
 

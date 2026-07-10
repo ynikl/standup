@@ -27,6 +27,8 @@ StandUp is a local-first iPhone and Apple Watch app for automatic sedentary remi
 ```sh
 swift run StandUpCoreChecks
 Checks/run-shared-checks.sh
+Checks/check-watch-timeline.sh
+Checks/check-watch-bundle-metadata.sh
 swift build
 ```
 
