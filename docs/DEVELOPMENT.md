@@ -14,6 +14,7 @@ Checks/check-watch-bundle-metadata.sh
 Checks/check-watch-startup-order.sh
 Checks/check-history-correction-menu.sh
 Checks/check-platform-session-ownership.sh
+Checks/check-operational-recovery-ui.sh
 swift build
 ```
 
@@ -38,6 +39,7 @@ The check runner covers:
 - Watch monitoring starts independently of notification authorization
 - complete and accessible iPhone history correction actions
 - explicit Watch ownership of live sessions and skip controls
+- visible and retryable operational failures on iPhone and Watch
 
 ## Generate Xcode Project
 

@@ -28,8 +28,8 @@ Only one retry may run at a time. A second invocation while retrying returns imm
 
 The command processes currently failed layers in dependency order:
 
-1. **Storage:** A load failure retries `storage.load()` and rehydrates settings, records, the engine session, and the snapshot. A save failure retries writing the current in-memory state. The unreadable file is never overwritten by the load-retry path.
-2. **Synchronization:** If storage is healthy and synchronization previously failed, publish the current synchronized state without forcing another local write.
+1. **Storage:** A load failure retries `storage.load()`, merges the recovered synchronized state with newer in-memory revisions, preserves an in-memory session changed since the failure, and restores the engine and snapshot. Only after a successful read does it atomically persist the merged result. A save failure retries writing the current in-memory state. The unreadable file is never overwritten.
+2. **Synchronization:** If either load or save recovery succeeded, or publishing previously failed, publish the current synchronized state without forcing another local write. If activation or decoding previously failed, asynchronously reactivate the bridge, keep retry progress visible until activation completes, and process its latest received application context.
 3. **Reminders:** If reminder scheduling previously failed, invalidate the cached reminder plan, reconcile it again, and await the replacement task.
 
 Each successful layer clears only its own failure. A failed retry refreshes that layer's message and leaves the Retry control available. `operationalError` keeps the current storage, synchronization, then reminder priority.
@@ -38,7 +38,7 @@ Each successful layer clears only its own failure. A failed retry refreshes that
 
 Replace the untyped persistence string with an internal failure value that distinguishes load from save failures while retaining the same user-visible message. This distinction is required because retrying a load must read and restore data, while retrying a save must preserve and write current memory.
 
-Extract synchronization publishing from `persist(synchronize:)` into a private helper. Normal persistence behavior remains unchanged; the helper only removes duplication so explicit retry can publish without rewriting storage.
+Extract synchronization publishing from `persist(synchronize:)` into a private helper. Keep publish failures separate from receive/activation failures so success on one path cannot hide a failure on the other. `StandUpSyncing` reports activation success explicitly, allowing the model to clear an activation failure only after the bridge confirms recovery.
 
 No persistence schema, WatchConnectivity payload, engine API, or notification identifier changes.
 
@@ -50,7 +50,7 @@ When `operationalError` is non-nil, Settings shows an `App status` section befor
 - a full-width `Try again` command;
 - a progress indicator and disabled command while retrying.
 
-The status appears in Settings because storage and sync failures affect the whole app rather than a specific Today metric. It disappears automatically after all failed layers recover. The error is communicated with icon and text, not color alone.
+The status appears in Settings because storage and sync failures affect the whole app rather than a specific Today metric. It disappears automatically after all failed layers recover. The error is communicated with icon and text, not color alone. The Stepper draft values observe `model.settings`, so a successful reload replaces fallback values before another edit can write stale settings back.
 
 ## Watch Experience
 
@@ -60,8 +60,9 @@ The warning button runs the same retry command. During retry it becomes a progre
 
 ## Error Handling
 
-- A successful storage reload restores the persisted engine session at the supplied retry time, then reconciles reminders if this model manages them.
+- A successful storage reload merges settings and records by their existing revisions. It restores the persisted engine session only when the in-memory session has not changed since the load failure; otherwise it preserves the current session. The merged state is saved, published, then reconciled if this model manages reminders.
 - Synchronization retry is skipped while storage remains unhealthy so an empty fallback state cannot overwrite the peer.
+- An activated WatchConnectivity session immediately reports activation success and reprocesses its latest application context. Otherwise async retry waits for the activation callback, keeping the command disabled. A still-invalid payload raises the receive error again; a corrected payload merges normally.
 - Reminder retry is skipped while storage remains unhealthy for the same reason.
 - Review-only iPhone models still never schedule reminders; they can retry storage and sync normally.
 - Retry completion always resets the loading state with `defer`, including when a layer fails again.
@@ -70,10 +71,11 @@ The warning button runs the same retry command. During retry it becomes a progre
 
 Extend shared behavior checks with recover-on-second-attempt adapters and verify:
 
-- a load retry restores persisted settings and clears the error without saving over the failed load;
-- a save retry writes current state and clears the error;
+- a load retry preserves newer synchronized settings and current session changes, saves only after the read succeeds, publishes the merged state, and clears the error;
+- a save retry writes and publishes current state, then clears the error;
 - a sync retry publishes current state and clears the error without an extra local save;
+- an activation retry keeps progress visible, coalesces duplicate commands, and clears its error only after activation succeeds;
 - a reminder retry replaces the plan and clears the error;
 - concurrent retry calls do not create duplicate operations.
 
-Add a source contract check requiring the iPhone Settings status section, loading/disabled Retry state, Watch 44-point error control, and accessibility label/hint. Run all existing checks, `swift build`, and iOS/Watch simulator-SDK builds.
+Add a source contract check requiring the iPhone Settings status section, loading/disabled Retry state, model-to-Stepper synchronization, Watch 44-point error control, and accessibility label/hint. Run all existing checks, `swift build`, and iOS/Watch simulator-SDK builds.

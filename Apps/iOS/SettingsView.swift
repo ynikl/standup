@@ -1,3 +1,4 @@
+import StandUpCore
 import SwiftUI
 
 struct SettingsView: View {
@@ -9,6 +10,35 @@ struct SettingsView: View {
     var body: some View {
         NavigationStack {
             Form {
+                if let error = model.operationalError {
+                    Section("App status") {
+                        Label {
+                            Text(error)
+                                .font(.footnote)
+                        } icon: {
+                            Image(systemName: "exclamationmark.triangle.fill")
+                                .foregroundStyle(Color.standAlert)
+                        }
+
+                        Button {
+                            Task {
+                                await model.retryOperationalWork()
+                            }
+                        } label: {
+                            HStack(spacing: 8) {
+                                if model.isRetryingOperationalWork {
+                                    ProgressView()
+                                        .controlSize(.small)
+                                }
+                                Text(model.isRetryingOperationalWork ? "Retrying..." : "Try again")
+                                Spacer()
+                            }
+                            .frame(minHeight: 44)
+                        }
+                        .disabled(model.isRetryingOperationalWork)
+                    }
+                }
+
                 Section("Sedentary threshold") {
                     Stepper(value: $threshold, in: 15...120, step: 5) {
                         HStack {
@@ -52,9 +82,10 @@ struct SettingsView: View {
             .scrollContentBackground(.hidden)
             .background(Color.standCanvas)
             .onAppear {
-                threshold = Double(model.settings.sedentaryThresholdMinutes)
-                startHour = Double(model.settings.activeWindow.startMinuteOfDay / 60)
-                endHour = Double(model.settings.activeWindow.endMinuteOfDay / 60)
+                syncControls(with: model.settings)
+            }
+            .onChange(of: model.settings) { _, settings in
+                syncControls(with: settings)
             }
             .onChange(of: threshold) { _, newValue in
                 model.updateThreshold(minutes: Int(newValue))
@@ -66,5 +97,11 @@ struct SettingsView: View {
                 model.updateActiveWindow(startHour: Int(startHour), endHour: Int(newValue))
             }
         }
+    }
+
+    private func syncControls(with settings: StandUpSettings) {
+        threshold = Double(settings.sedentaryThresholdMinutes)
+        startHour = Double(settings.activeWindow.startMinuteOfDay / 60)
+        endHour = Double(settings.activeWindow.endMinuteOfDay / 60)
     }
 }

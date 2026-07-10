@@ -32,6 +32,7 @@ Checks/check-watch-bundle-metadata.sh
 Checks/check-watch-startup-order.sh
 Checks/check-history-correction-menu.sh
 Checks/check-platform-session-ownership.sh
+Checks/check-operational-recovery-ui.sh
 swift build
 ```
 

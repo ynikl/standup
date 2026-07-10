@@ -13,6 +13,7 @@ final class StandUpAppModel: ObservableObject {
     @Published var permissionState: PermissionState
     @Published var lastNotificationReason: NotificationReason?
     @Published private(set) var operationalError: String?
+    @Published private(set) var isRetryingOperationalWork = false
 
     private var engine: SedentaryEngine
     private let storage: StandUpStorage
@@ -24,8 +25,10 @@ final class StandUpAppModel: ObservableObject {
     private var reminderReconciliationGeneration = 0
     private var settingsUpdatedAt: Date
     private var persistenceEnabled: Bool
-    private var persistenceError: String?
-    private var syncError: String?
+    private var sessionChangedWhileStorageUnavailable: Bool
+    private var persistenceFailure: PersistenceFailure?
+    private var syncPublishError: String?
+    private var syncReceiveError: String?
     private var notificationError: String?
 
     init(
@@ -44,11 +47,11 @@ final class StandUpAppModel: ObservableObject {
         self.managesReminders = managesReminders
 
         let persisted: StandUpLocalState
-        let loadError: String?
+        let loadFailure: PersistenceFailure?
         do {
             persisted = try storage.load()
             self.persistenceEnabled = true
-            loadError = nil
+            loadFailure = nil
         } catch {
             persisted = StandUpLocalState(
                 synchronized: StandUpDataState(
@@ -58,16 +61,18 @@ final class StandUpAppModel: ObservableObject {
                 )
             )
             self.persistenceEnabled = false
-            loadError = "Unable to load local data: \(error.localizedDescription)"
+            loadFailure = .load("Unable to load local data: \(error.localizedDescription)")
         }
         self.settings = persisted.synchronized.settings
         self.settingsUpdatedAt = persisted.synchronized.settingsUpdatedAt
         self.records = persisted.synchronized.records.sorted { $0.thresholdReachedAt > $1.thresholdReachedAt }
         self.permissionState = .unknown
-        self.persistenceError = loadError
-        self.syncError = nil
+        self.sessionChangedWhileStorageUnavailable = false
+        self.persistenceFailure = loadFailure
+        self.syncPublishError = nil
+        self.syncReceiveError = nil
         self.notificationError = nil
-        self.operationalError = loadError
+        self.operationalError = loadFailure?.message
         self.engine = SedentaryEngine(
             settings: persisted.synchronized.settings,
             sessionState: persisted.session,
@@ -76,12 +81,16 @@ final class StandUpAppModel: ObservableObject {
         self.snapshot = engine.snapshot(at: now)
 
         self.sync.onReceive = { [weak self] state in
-            self?.syncError = nil
+            self?.syncReceiveError = nil
             self?.refreshOperationalError()
             self?.merge(state)
         }
         self.sync.onError = { [weak self] error in
-            self?.syncError = "Unable to receive synced data: \(error.localizedDescription)"
+            self?.syncReceiveError = "Unable to receive synced data: \(error.localizedDescription)"
+            self?.refreshOperationalError()
+        }
+        self.sync.onActivation = { [weak self] in
+            self?.syncReceiveError = nil
             self?.refreshOperationalError()
         }
         self.sync.activate()
@@ -199,6 +208,46 @@ final class StandUpAppModel: ObservableObject {
         await reminderReconciliationTask?.value
     }
 
+    func retryOperationalWork(now: Date = Date()) async {
+        guard operationalError != nil, !isRetryingOperationalWork else {
+            return
+        }
+
+        isRetryingOperationalWork = true
+        defer { isRetryingOperationalWork = false }
+
+        var restoredStorage = false
+        if let failure = persistenceFailure {
+            switch failure {
+            case .load:
+                restoredStorage = retryStorageLoad(now: now)
+            case .save:
+                persist(recoverStorage: true)
+                restoredStorage = self.persistenceFailure == nil
+            }
+        }
+
+        guard persistenceFailure == nil else {
+            return
+        }
+
+        if syncPublishError != nil || restoredStorage {
+            publishSynchronizedState()
+        }
+
+        if syncReceiveError != nil {
+            await sync.retryActivation()
+        }
+
+        if notificationError != nil || restoredStorage {
+            lastReminderPlan = nil
+            reconcileReminders(now: now)
+            await reminderReconciliationTask?.value
+        }
+
+        refreshOperationalError()
+    }
+
     private func apply(
         _ output: EngineOutput,
         at now: Date,
@@ -211,6 +260,9 @@ final class StandUpAppModel: ObservableObject {
 
         lastNotificationReason = output.notificationReason
         snapshot = engine.snapshot(at: now)
+        if sessionChanged && !persistenceEnabled {
+            sessionChangedWhileStorageUnavailable = true
+        }
         if sessionChanged || !output.endedRecords.isEmpty {
             persist(synchronize: !output.endedRecords.isEmpty)
         }
@@ -228,7 +280,7 @@ final class StandUpAppModel: ObservableObject {
     }
 
     private func persist(synchronize: Bool = false, recoverStorage: Bool = false) {
-        if recoverStorage {
+        if recoverStorage, case .save = persistenceFailure {
             persistenceEnabled = true
         }
 
@@ -239,25 +291,57 @@ final class StandUpAppModel: ObservableObject {
         let synchronizedState = synchronizedState
         do {
             try storage.save(StandUpLocalState(synchronized: synchronizedState, session: engine.sessionState))
-            persistenceError = nil
+            persistenceFailure = nil
+            sessionChangedWhileStorageUnavailable = false
             refreshOperationalError()
         } catch {
             persistenceEnabled = false
-            persistenceError = "Unable to save local data: \(error.localizedDescription)"
+            persistenceFailure = .save("Unable to save local data: \(error.localizedDescription)")
             refreshOperationalError()
             return
         }
 
         if synchronize {
-            do {
-                try sync.publish(synchronizedState)
-                syncError = nil
-                refreshOperationalError()
-            } catch {
-                syncError = "Unable to sync data: \(error.localizedDescription)"
-                refreshOperationalError()
-            }
+            publishSynchronizedState()
         }
+    }
+
+    private func retryStorageLoad(now: Date) -> Bool {
+        do {
+            let persisted = try storage.load()
+            let recoveredSynchronizedState = persisted.synchronized.merging(synchronizedState)
+            let recoveredSession = sessionChangedWhileStorageUnavailable
+                ? engine.sessionState
+                : persisted.session
+            persistenceEnabled = true
+            persistenceFailure = nil
+            settings = recoveredSynchronizedState.settings
+            settingsUpdatedAt = recoveredSynchronizedState.settingsUpdatedAt
+            records = recoveredSynchronizedState.records
+            engine = SedentaryEngine(
+                settings: recoveredSynchronizedState.settings,
+                sessionState: recoveredSession,
+                restoredAt: now
+            )
+            snapshot = engine.snapshot(at: now)
+            persist()
+            return persistenceFailure == nil
+        } catch {
+            persistenceEnabled = false
+            persistenceFailure = .load("Unable to load local data: \(error.localizedDescription)")
+            refreshOperationalError()
+            return false
+        }
+    }
+
+    private func publishSynchronizedState() {
+        do {
+            try sync.publish(synchronizedState)
+            syncPublishError = nil
+        } catch {
+            syncPublishError = "Unable to sync data: \(error.localizedDescription)"
+        }
+        refreshOperationalError()
     }
 
     private func merge(_ state: StandUpDataState) {
@@ -311,7 +395,22 @@ final class StandUpAppModel: ObservableObject {
     }
 
     private func refreshOperationalError() {
-        operationalError = persistenceError ?? syncError ?? notificationError
+        operationalError = persistenceFailure?.message
+            ?? syncPublishError
+            ?? syncReceiveError
+            ?? notificationError
+    }
+}
+
+private enum PersistenceFailure {
+    case load(String)
+    case save(String)
+
+    var message: String {
+        switch self {
+        case .load(let message), .save(let message):
+            return message
+        }
     }
 }
 

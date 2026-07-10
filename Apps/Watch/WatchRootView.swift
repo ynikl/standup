@@ -22,9 +22,18 @@ private struct WatchStatusView: View {
     var body: some View {
         TimelineView(.periodic(from: timelineStart, by: 60)) { context in
             VStack(spacing: 10) {
-                Image(systemName: icon)
-                    .font(.system(size: 24, weight: .bold))
-                    .foregroundStyle(color)
+                HStack {
+                    Color.clear
+                        .frame(width: 44, height: 44)
+                        .accessibilityHidden(true)
+                    Spacer()
+                    Image(systemName: icon)
+                        .font(.system(size: 24, weight: .bold))
+                        .foregroundStyle(color)
+                    Spacer()
+                    WatchOperationalRetryButton()
+                }
+                .frame(height: 44)
 
                 Text(StandUpFormatting.minutes(model.snapshot.seatedMinutes))
                     .font(.system(size: 42, weight: .bold, design: .rounded))
@@ -93,6 +102,42 @@ private struct WatchStatusView: View {
         case .paused:
             return .secondary
         }
+    }
+}
+
+private struct WatchOperationalRetryButton: View {
+    @EnvironmentObject private var model: StandUpAppModel
+
+    var body: some View {
+        Group {
+            if let error = model.operationalError {
+                Button {
+                    Task {
+                        await model.retryOperationalWork()
+                    }
+                } label: {
+                    Group {
+                        if model.isRetryingOperationalWork {
+                            ProgressView()
+                        } else {
+                            Image(systemName: "exclamationmark.triangle.fill")
+                                .foregroundStyle(Color.watchAlert)
+                        }
+                    }
+                    .frame(width: 44, height: 44)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .disabled(model.isRetryingOperationalWork)
+                .accessibilityLabel("Retry failed operation")
+                .accessibilityHint(error)
+            } else {
+                Color.clear
+                    .frame(width: 44, height: 44)
+                    .accessibilityHidden(true)
+            }
+        }
+        .frame(width: 44, height: 44)
     }
 }
 

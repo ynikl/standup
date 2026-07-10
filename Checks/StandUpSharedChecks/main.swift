@@ -53,9 +53,21 @@ struct StandUpSharedChecks {
         print("PASS threshold tick preserves planned reminder")
         try await checkReviewOnlyModelNeverSchedulesReminders()
         print("PASS review-only model never schedules reminders")
+        try await checkRetriesStorageLoad()
+        print("PASS retries storage load")
+        try await checkRetriesStorageSave()
+        print("PASS retries storage save")
+        try await checkRetriesSynchronization()
+        print("PASS retries synchronization")
+        try await checkRetriesReminderScheduling()
+        print("PASS retries reminder scheduling")
+        try await checkCoalescesConcurrentRetries()
+        print("PASS coalesces concurrent retries")
+        try await checkRetriesSyncActivation()
+        print("PASS retries sync activation")
         try checkReportsSessionActivationFailure()
         print("PASS reports session activation failure")
-        print("\nAll 14 shared checks passed")
+        print("\nAll 20 shared checks passed")
     }
 
     private static func checkRestoresPersistedSession() throws {
@@ -257,7 +269,13 @@ struct StandUpSharedChecks {
         )
 
         model.updateThreshold(minutes: 60, now: now)
-        try expect(storage.saveCount == 1, "explicit setting change should restore persistence")
+        try expect(storage.saveCount == 0, "explicit setting change must not overwrite unreadable storage")
+        try expect(
+            model.operationalError?.contains("Unable to load local data") == true,
+            "explicit setting change must preserve the load error"
+        )
+        await model.retryOperationalWork(now: now)
+        try expect(storage.saveCount == 0, "failed load retry must not write storage")
     }
 
     private static func checkSurfacesSyncFailure() async throws {
@@ -377,16 +395,240 @@ struct StandUpSharedChecks {
         try expect(notifier.plans.isEmpty, "review-only model must not replace reminders")
     }
 
+    private static func checkRetriesStorageLoad() async throws {
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+        let recoveredSettings = StandUpSettings(
+            sedentaryThresholdMinutes: 75,
+            activeWindow: ActiveWindow(startMinuteOfDay: 0, endMinuteOfDay: 24 * 60)
+        )
+        let storage = RecoveringLoadStorage(
+            recoveredState: StandUpLocalState(
+                synchronized: StandUpDataState(
+                    settings: recoveredSettings,
+                    settingsUpdatedAt: now,
+                    records: []
+                )
+            )
+        )
+        let sync = MemorySync()
+        let model = StandUpAppModel(
+            storage: storage,
+            notifier: NoopNotifier(),
+            sync: sync,
+            managesReminders: false,
+            now: now
+        )
+
+        try expect(model.operationalError?.contains("Unable to load local data") == true, "load failure should be visible before retry")
+        model.ingest(activity: .sedentary, now: now)
+        model.updateThreshold(minutes: 90, now: now.addingTimeInterval(1))
+        sync.onReceive?(
+            StandUpDataState(
+                settings: StandUpSettings(
+                    sedentaryThresholdMinutes: 85,
+                    activeWindow: ActiveWindow(startMinuteOfDay: 0, endMinuteOfDay: 24 * 60)
+                ),
+                settingsUpdatedAt: now.addingTimeInterval(0.5),
+                records: []
+            )
+        )
+        try expect(storage.saveCount == 0, "edits after load failure must not overwrite unreadable data")
+        try expect(model.operationalError?.contains("Unable to load local data") == true, "edits must preserve the load error")
+        await model.retryOperationalWork(now: now.addingTimeInterval(60))
+
+        try expect(model.settings.sedentaryThresholdMinutes == 90, "load retry should preserve newer synced settings")
+        try expect(model.snapshot.seatedMinutes == 1, "load retry should preserve the current session")
+        try expect(storage.saveCount == 1, "load retry should persist after a successful read")
+        try expect(storage.savedState?.synchronized.settings.sedentaryThresholdMinutes == 90, "load retry should save merged settings")
+        try expect(storage.savedState?.session.seatedSince == now, "load retry should save the current session")
+        try expect(sync.published.last?.settings.sedentaryThresholdMinutes == 90, "load retry should publish merged settings")
+        try expect(model.operationalError == nil, "load retry should clear the error")
+    }
+
+    private static func checkRetriesStorageSave() async throws {
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+        let settings = StandUpSettings(
+            activeWindow: ActiveWindow(startMinuteOfDay: 0, endMinuteOfDay: 24 * 60)
+        )
+        let storage = RecoveringSaveStorage(
+            state: StandUpLocalState(
+                synchronized: StandUpDataState(settings: settings, settingsUpdatedAt: now, records: [])
+            )
+        )
+        let sync = MemorySync()
+        let model = StandUpAppModel(
+            storage: storage,
+            notifier: NoopNotifier(),
+            sync: sync,
+            managesReminders: false,
+            now: now
+        )
+
+        model.updateThreshold(minutes: 60, now: now.addingTimeInterval(1))
+        try expect(model.operationalError?.contains("Unable to save local data") == true, "save failure should be visible before retry")
+        await model.retryOperationalWork(now: now.addingTimeInterval(2))
+
+        try expect(storage.saveAttempts == 2, "save retry should make one new attempt")
+        try expect(storage.state.synchronized.settings.sedentaryThresholdMinutes == 60, "save retry should persist current settings")
+        try expect(sync.published.last?.settings.sedentaryThresholdMinutes == 60, "save retry should publish recovered settings")
+        try expect(model.operationalError == nil, "save retry should clear the error")
+    }
+
+    private static func checkRetriesSynchronization() async throws {
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+        let settings = StandUpSettings(
+            activeWindow: ActiveWindow(startMinuteOfDay: 0, endMinuteOfDay: 24 * 60)
+        )
+        let storage = MemoryStorage(
+            state: StandUpLocalState(
+                synchronized: StandUpDataState(settings: settings, settingsUpdatedAt: now, records: [])
+            )
+        )
+        let sync = RecoveringSync()
+        let model = StandUpAppModel(
+            storage: storage,
+            notifier: NoopNotifier(),
+            sync: sync,
+            managesReminders: false,
+            now: now
+        )
+
+        model.updateThreshold(minutes: 60, now: now.addingTimeInterval(1))
+        try expect(model.operationalError?.contains("Unable to sync data") == true, "sync failure should be visible before retry")
+        sync.onReceive?(
+            StandUpDataState(
+                settings: .default,
+                settingsUpdatedAt: now.addingTimeInterval(-1),
+                records: []
+            )
+        )
+        try expect(model.operationalError?.contains("Unable to sync data") == true, "incoming state must not clear a pending publish failure")
+        let saveCountBeforeRetry = storage.saveCount
+        await model.retryOperationalWork(now: now.addingTimeInterval(2))
+
+        try expect(sync.publishAttempts == 2, "sync retry should make one new attempt")
+        try expect(sync.published.last?.settings.sedentaryThresholdMinutes == 60, "sync retry should publish current settings")
+        try expect(storage.saveCount == saveCountBeforeRetry, "sync retry must not rewrite local storage")
+        try expect(model.operationalError == nil, "sync retry should clear the error")
+    }
+
+    private static func checkRetriesReminderScheduling() async throws {
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+        let settings = StandUpSettings(
+            activeWindow: ActiveWindow(startMinuteOfDay: 0, endMinuteOfDay: 24 * 60)
+        )
+        let notifier = RecoveringNotifier()
+        let model = StandUpAppModel(
+            storage: MemoryStorage(
+                state: StandUpLocalState(
+                    synchronized: StandUpDataState(settings: settings, settingsUpdatedAt: now, records: [])
+                )
+            ),
+            notifier: notifier,
+            sync: MemorySync(),
+            now: now
+        )
+
+        model.ingest(activity: .sedentary, now: now)
+        await model.waitForReminderReconciliation()
+        try expect(model.operationalError?.contains("Unable to update reminders") == true, "reminder failure should be visible before retry")
+
+        await model.retryOperationalWork(now: now.addingTimeInterval(1))
+
+        try expect(notifier.replaceAttempts == 2, "reminder retry should make one new attempt")
+        try expect(notifier.plans.count == 1, "reminder retry should apply the replacement plan")
+        try expect(model.operationalError == nil, "reminder retry should clear the error")
+    }
+
+    private static func checkCoalescesConcurrentRetries() async throws {
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+        let settings = StandUpSettings(
+            activeWindow: ActiveWindow(startMinuteOfDay: 0, endMinuteOfDay: 24 * 60)
+        )
+        let notifier = BlockingRetryNotifier()
+        let model = StandUpAppModel(
+            storage: MemoryStorage(
+                state: StandUpLocalState(
+                    synchronized: StandUpDataState(settings: settings, settingsUpdatedAt: now, records: [])
+                )
+            ),
+            notifier: notifier,
+            sync: MemorySync(),
+            now: now
+        )
+
+        model.ingest(activity: .sedentary, now: now)
+        await model.waitForReminderReconciliation()
+
+        let retryTask = Task {
+            await model.retryOperationalWork(now: now.addingTimeInterval(1))
+        }
+        await notifier.waitUntilRetryStarts()
+        try expect(model.isRetryingOperationalWork, "model should expose retry progress")
+
+        await model.retryOperationalWork(now: now.addingTimeInterval(2))
+        try expect(notifier.replaceAttempts == 2, "concurrent retry must not duplicate work")
+
+        notifier.releaseRetry()
+        await retryTask.value
+        try expect(!model.isRetryingOperationalWork, "retry progress should reset")
+        try expect(model.operationalError == nil, "completed retry should clear the error")
+    }
+
+    private static func checkRetriesSyncActivation() async throws {
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+        let settings = StandUpSettings(
+            activeWindow: ActiveWindow(startMinuteOfDay: 0, endMinuteOfDay: 24 * 60)
+        )
+        let sync = BlockingActivationSync()
+        let model = StandUpAppModel(
+            storage: MemoryStorage(
+                state: StandUpLocalState(
+                    synchronized: StandUpDataState(settings: settings, settingsUpdatedAt: now, records: [])
+                )
+            ),
+            notifier: NoopNotifier(),
+            sync: sync,
+            managesReminders: false,
+            now: now
+        )
+
+        try expect(model.operationalError?.contains("Unable to receive synced data") == true, "activation failure should be visible before retry")
+        let retryTask = Task {
+            await model.retryOperationalWork(now: now)
+        }
+        await sync.waitUntilRetryStarts()
+
+        try expect(model.isRetryingOperationalWork, "activation retry should keep progress visible until completion")
+        await model.retryOperationalWork(now: now.addingTimeInterval(1))
+        try expect(sync.activationAttempts == 2, "sync retry should reactivate once")
+
+        sync.completeRetry()
+        await retryTask.value
+
+        try expect(model.operationalError == nil, "successful activation retry should clear the error")
+        try expect(!model.isRetryingOperationalWork, "activation retry should clear progress after completion")
+    }
+
     private static func checkReportsSessionActivationFailure() throws {
         let bridge = WatchConnectivityStandUpBridge()
         var receivedError = false
+        var receivedActivation = false
         bridge.onError = { _ in
             receivedError = true
+        }
+        bridge.onActivation = {
+            receivedActivation = true
         }
 
         bridge.handleActivation(error: ExpectedSyncError())
 
         try expect(receivedError, "session activation failure should be reported")
+        try expect(!receivedActivation, "session activation failure must not report success")
+
+        bridge.handleActivation(error: nil)
+
+        try expect(receivedActivation, "session activation success should be reported")
     }
 }
 
@@ -422,6 +664,51 @@ private final class FailingLoadStorage: StandUpStorage {
     }
 }
 
+private final class RecoveringLoadStorage: StandUpStorage {
+    let recoveredState: StandUpLocalState
+    var loadAttempts = 0
+    var saveCount = 0
+    var savedState: StandUpLocalState?
+
+    init(recoveredState: StandUpLocalState) {
+        self.recoveredState = recoveredState
+    }
+
+    func load() throws -> StandUpLocalState {
+        loadAttempts += 1
+        if loadAttempts == 1 {
+            throw ExpectedStorageError()
+        }
+        return recoveredState
+    }
+
+    func save(_ state: StandUpLocalState) throws {
+        saveCount += 1
+        savedState = state
+    }
+}
+
+private final class RecoveringSaveStorage: StandUpStorage {
+    var state: StandUpLocalState
+    var saveAttempts = 0
+
+    init(state: StandUpLocalState) {
+        self.state = state
+    }
+
+    func load() throws -> StandUpLocalState {
+        state
+    }
+
+    func save(_ state: StandUpLocalState) throws {
+        saveAttempts += 1
+        if saveAttempts == 1 {
+            throw ExpectedStorageError()
+        }
+        self.state = state
+    }
+}
+
 @MainActor
 private struct NoopNotifier: StandUpNotificationScheduling {
     func requestAuthorization() async throws -> Bool { true }
@@ -443,6 +730,67 @@ private final class RecordingNotifier: StandUpNotificationScheduling {
 }
 
 private struct ExpectedNotificationError: Error {}
+
+@MainActor
+private final class RecoveringNotifier: StandUpNotificationScheduling {
+    var replaceAttempts = 0
+    var plans: [ReminderPlan] = []
+
+    func requestAuthorization() async throws -> Bool { true }
+
+    func replaceSedentaryReminders(with plan: ReminderPlan) async throws {
+        replaceAttempts += 1
+        if replaceAttempts == 1 {
+            throw ExpectedNotificationError()
+        }
+        plans.append(plan)
+    }
+
+    func cancelSedentaryReminders() async {}
+}
+
+@MainActor
+private final class BlockingRetryNotifier: StandUpNotificationScheduling {
+    var replaceAttempts = 0
+
+    private var retryStarted = false
+    private var retryStartedWaiters: [CheckedContinuation<Void, Never>] = []
+    private var releaseContinuation: CheckedContinuation<Void, Never>?
+
+    func requestAuthorization() async throws -> Bool { true }
+
+    func replaceSedentaryReminders(with plan: ReminderPlan) async throws {
+        replaceAttempts += 1
+        if replaceAttempts == 1 {
+            throw ExpectedNotificationError()
+        }
+
+        retryStarted = true
+        let waiters = retryStartedWaiters
+        retryStartedWaiters.removeAll()
+        waiters.forEach { $0.resume() }
+
+        await withCheckedContinuation { continuation in
+            releaseContinuation = continuation
+        }
+    }
+
+    func cancelSedentaryReminders() async {}
+
+    func waitUntilRetryStarts() async {
+        guard !retryStarted else {
+            return
+        }
+        await withCheckedContinuation { continuation in
+            retryStartedWaiters.append(continuation)
+        }
+    }
+
+    func releaseRetry() {
+        releaseContinuation?.resume()
+        releaseContinuation = nil
+    }
+}
 
 @MainActor
 private struct FailingNotifier: StandUpNotificationScheduling {
@@ -495,9 +843,11 @@ private final class SlowFirstNotifier: StandUpNotificationScheduling {
 private final class MemorySync: StandUpSyncing {
     var onReceive: ((StandUpDataState) -> Void)?
     var onError: ((Error) -> Void)?
+    var onActivation: (() -> Void)?
     var published: [StandUpDataState] = []
 
     func activate() {}
+    func retryActivation() async { activate() }
 
     func publish(_ state: StandUpDataState) throws {
         published.append(state)
@@ -507,11 +857,86 @@ private final class MemorySync: StandUpSyncing {
 private struct ExpectedSyncError: Error {}
 
 @MainActor
+private final class RecoveringSync: StandUpSyncing {
+    var onReceive: ((StandUpDataState) -> Void)?
+    var onError: ((Error) -> Void)?
+    var onActivation: (() -> Void)?
+    var publishAttempts = 0
+    var published: [StandUpDataState] = []
+
+    func activate() {}
+    func retryActivation() async { activate() }
+
+    func publish(_ state: StandUpDataState) throws {
+        publishAttempts += 1
+        if publishAttempts == 1 {
+            throw ExpectedSyncError()
+        }
+        published.append(state)
+    }
+}
+
+@MainActor
+private final class BlockingActivationSync: StandUpSyncing {
+    var onReceive: ((StandUpDataState) -> Void)?
+    var onError: ((Error) -> Void)?
+    var onActivation: (() -> Void)?
+    var activationAttempts = 0
+
+    private var retryStarted = false
+    private var retryStartedWaiters: [CheckedContinuation<Void, Never>] = []
+    private var releaseContinuation: CheckedContinuation<Void, Never>?
+
+    func activate() {
+        activationAttempts += 1
+        if activationAttempts == 1 {
+            onError?(ExpectedSyncError())
+        } else {
+            markRetryStarted()
+        }
+    }
+
+    func retryActivation() async {
+        activationAttempts += 1
+        markRetryStarted()
+        await withCheckedContinuation { continuation in
+            releaseContinuation = continuation
+        }
+    }
+
+    func publish(_ state: StandUpDataState) throws {}
+
+    func waitUntilRetryStarts() async {
+        guard !retryStarted else {
+            return
+        }
+        await withCheckedContinuation { continuation in
+            retryStartedWaiters.append(continuation)
+        }
+    }
+
+    func completeRetry() {
+        onActivation?()
+        releaseContinuation?.resume()
+        releaseContinuation = nil
+    }
+
+    private func markRetryStarted() {
+        retryStarted = true
+        let waiters = retryStartedWaiters
+        retryStartedWaiters.removeAll()
+        waiters.forEach { $0.resume() }
+    }
+}
+
+@MainActor
 private final class FailingSync: StandUpSyncing {
     var onReceive: ((StandUpDataState) -> Void)?
     var onError: ((Error) -> Void)?
+    var onActivation: (() -> Void)?
 
     func activate() {}
+    func retryActivation() async { activate() }
 
     func publish(_ state: StandUpDataState) throws {
         throw ExpectedSyncError()
