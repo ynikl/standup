@@ -29,6 +29,7 @@ swift run StandUpCoreChecks
 Checks/run-shared-checks.sh
 Checks/check-watch-timeline.sh
 Checks/check-watch-bundle-metadata.sh
+Checks/check-watch-startup-order.sh
 swift build
 ```
 

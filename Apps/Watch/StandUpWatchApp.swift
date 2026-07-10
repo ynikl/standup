@@ -10,11 +10,11 @@ struct StandUpWatchApp: App {
             WatchRootView()
                 .environmentObject(model)
                 .task {
-                    await model.requestPermissions()
                     model.refresh()
                     motion.start { signal in
                         model.ingest(activity: signal)
                     }
+                    await model.requestPermissions()
                 }
         }
     }

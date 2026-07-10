@@ -11,6 +11,7 @@ swift run StandUpCoreChecks
 Checks/run-shared-checks.sh
 Checks/check-watch-timeline.sh
 Checks/check-watch-bundle-metadata.sh
+Checks/check-watch-startup-order.sh
 swift build
 ```
 
@@ -32,6 +33,7 @@ The check runner covers:
 - shared app-model persistence and notification reconciliation
 - stable Watch timeline scheduling across SwiftUI renders
 - standalone Watch app bundle metadata
+- Watch monitoring starts independently of notification authorization
 
 ## Generate Xcode Project
 
