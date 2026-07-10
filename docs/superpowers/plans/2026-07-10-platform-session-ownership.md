@@ -4,7 +4,7 @@
 
 **Goal:** Remove iPhone controls and status that operate on a non-authoritative local sedentary session while preserving Watch ownership of live monitoring and skip actions.
 
-**Architecture:** Keep the existing core engine, app model, persistence, and synchronization boundaries unchanged. Make the platform ownership decision explicit at composition and view level: iPhone renders synchronized completed-record information and settings, while Watch alone starts, refreshes, displays, and controls a live session.
+**Architecture:** Keep the existing core engine, persistence, and synchronization payloads unchanged. Make the platform ownership decision explicit through an injected app-model capability and platform composition: iPhone disables reminder reconciliation and renders synchronized completed-record information and settings, while Watch alone starts, refreshes, displays, and controls a live session.
 
 **Tech Stack:** Swift 6, SwiftUI, POSIX shell source-contract checks, Swift Package Manager, Xcode simulator SDK builds
 
@@ -19,7 +19,7 @@
 - Test: `Apps/Watch/StandUpWatchApp.swift`
 - Test: `Apps/Watch/WatchRootView.swift`
 
-- [ ] **Step 1: Create the source contract check**
+- [x] **Step 1: Create the source contract check**
 
 ```sh
 #!/bin/sh
@@ -73,7 +73,7 @@ if ! rg --quiet --fixed-strings 'model.ignore(duration)' "$WATCH_ROOT"; then
 fi
 ```
 
-- [ ] **Step 2: Run the check and verify red**
+- [x] **Step 2: Run the check and verify red**
 
 Run:
 
@@ -92,22 +92,27 @@ Expected: exit 1 with `iPhone dashboard must not own live sessions: StatusHero(`
 - Modify: `docs/DEVELOPMENT.md:9-38`
 - Test: `Checks/check-platform-session-ownership.sh`
 
-- [ ] **Step 1: Remove iPhone live-session composition**
+- [x] **Step 1: Remove iPhone live-session composition**
 
-Replace `StandUpiOSApp.body` with:
+Construct the iPhone model in review-only reminder mode and replace `StandUpiOSApp.body` with:
 
 ```swift
+@StateObject private var model = StandUpAppModel(managesReminders: false)
+
 var body: some Scene {
     WindowGroup {
         RootTabView()
             .environmentObject(model)
+            .task {
+                await LocalStandUpNotificationScheduler().cancelSedentaryReminders()
+            }
     }
 }
 ```
 
-This leaves WatchConnectivity activation in `StandUpAppModel.init` intact while avoiding unused iPhone notification authorization and engine ticks.
+This leaves WatchConnectivity activation in `StandUpAppModel.init` intact, avoids unused iPhone notification authorization and engine ticks, and clears pending StandUp reminders left by an earlier version.
 
-- [ ] **Step 2: Reduce the iPhone dashboard to synchronized summaries**
+- [x] **Step 2: Reduce the iPhone dashboard to synchronized summaries**
 
 Keep `DashboardView`, `todaySummary`, and `SummaryTile`, but make the view body:
 
@@ -133,7 +138,7 @@ var body: some View {
 
 Delete the complete private declarations of `StatusHero`, `IgnoreActionsView`, and `PermissionBanner`. Keep `SummaryTile` unchanged.
 
-- [ ] **Step 3: Run the focused check and verify green**
+- [x] **Step 3: Run the focused check and verify green**
 
 Run:
 
@@ -143,7 +148,7 @@ Checks/check-platform-session-ownership.sh
 
 Expected: exit 0 with no output.
 
-- [ ] **Step 4: Add the ownership check to verification documentation**
+- [x] **Step 4: Add the ownership check to verification documentation**
 
 Add the command after `Checks/check-history-correction-menu.sh` in `README.md` and `docs/DEVELOPMENT.md`:
 
@@ -157,7 +162,7 @@ Add this coverage bullet to `docs/DEVELOPMENT.md`:
 - explicit Watch ownership of live sessions and skip controls
 ```
 
-- [ ] **Step 5: Compile the iPhone target**
+- [x] **Step 5: Compile the iPhone target**
 
 Run:
 
@@ -172,16 +177,55 @@ xcodebuild -project StandUp.xcodeproj \
 
 Expected: `** BUILD SUCCEEDED **`.
 
-### Task 3: Verify And Commit
+### Task 3: Disable Reminder Reconciliation On iPhone
+
+**Files:**
+- Modify: `Apps/Shared/StandUpAppModel.swift:17-40`
+- Modify: `Apps/Shared/StandUpAppModel.swift:271-307`
+- Modify: `Checks/StandUpSharedChecks/main.swift:22-375`
+- Modify: `Checks/check-platform-session-ownership.sh`
+
+- [x] **Step 1: Add a failing review-only reminder check**
+
+Create a `StandUpAppModel` with `managesReminders: false`, change its local threshold, deliver newer synchronized settings through `MemorySync.onReceive`, await reminder reconciliation, and require `RecordingNotifier.plans` to remain empty.
+
+- [x] **Step 2: Run the shared checks and verify red**
+
+Run: `Checks/run-shared-checks.sh`
+
+Expected: compilation fails with `extra argument 'managesReminders' in call`.
+
+- [x] **Step 3: Add the reminder-management capability**
+
+Add a `managesReminders` initializer parameter that defaults to `true`, store it on `StandUpAppModel`, and guard `reconcileReminders(now:)` before computing or executing a plan. Pass `false` from `StandUpiOSApp`; Watch keeps the default.
+
+- [x] **Step 4: Strengthen the platform source contract**
+
+Require the iPhone app to construct `StandUpAppModel(managesReminders: false)` and call `cancelSedentaryReminders()`. Scan the complete `Apps/iOS` directory for `model.ignore(` while retaining Watch startup and skip requirements.
+
+- [x] **Step 5: Run both focused checks and verify green**
+
+Run:
+
+```sh
+Checks/run-shared-checks.sh
+Checks/check-platform-session-ownership.sh
+```
+
+Expected: all 14 shared checks pass and the platform source check exits 0.
+
+### Task 4: Verify And Commit
 
 **Files:**
 - Verify: `Apps/iOS/DashboardView.swift`
 - Verify: `Apps/iOS/StandUpiOSApp.swift`
+- Verify: `Apps/Shared/StandUpAppModel.swift`
+- Verify: `Checks/StandUpSharedChecks/main.swift`
 - Verify: `Apps/Watch/StandUpWatchApp.swift`
 - Verify: `Apps/Watch/WatchRootView.swift`
 - Verify: `Checks/check-platform-session-ownership.sh`
 
-- [ ] **Step 1: Run all repository checks**
+- [x] **Step 1: Run all repository checks**
 
 Run each command independently:
 
@@ -196,9 +240,9 @@ Checks/check-platform-session-ownership.sh
 swift build
 ```
 
-Expected: 24 core checks and 13 shared checks pass, every source check exits 0, and the package build exits 0.
+Expected: 24 core checks and 14 shared checks pass, every source check exits 0, and the package build exits 0.
 
-- [ ] **Step 2: Build both application targets**
+- [x] **Step 2: Build both application targets**
 
 Run:
 
@@ -224,9 +268,9 @@ xcodebuild -project StandUp.xcodeproj \
 
 Expected: both application targets end with `** BUILD SUCCEEDED **`.
 
-- [ ] **Step 3: Commit the verified change**
+- [x] **Step 3: Commit the verified change**
 
 ```sh
-git add Apps/iOS/DashboardView.swift Apps/iOS/StandUpiOSApp.swift Checks/check-platform-session-ownership.sh README.md docs/DEVELOPMENT.md docs/superpowers/plans/2026-07-10-platform-session-ownership.md
+git add Apps/Shared/StandUpAppModel.swift Apps/iOS/DashboardView.swift Apps/iOS/StandUpiOSApp.swift Checks/StandUpSharedChecks/main.swift Checks/check-platform-session-ownership.sh README.md docs/DEVELOPMENT.md docs/superpowers/specs/2026-07-10-platform-session-ownership-design.md docs/superpowers/plans/2026-07-10-platform-session-ownership.md
 git commit -m "fix: enforce watch session ownership"
 ```

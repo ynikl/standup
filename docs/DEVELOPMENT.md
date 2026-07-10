@@ -13,6 +13,7 @@ Checks/check-watch-timeline.sh
 Checks/check-watch-bundle-metadata.sh
 Checks/check-watch-startup-order.sh
 Checks/check-history-correction-menu.sh
+Checks/check-platform-session-ownership.sh
 swift build
 ```
 
@@ -36,6 +37,7 @@ The check runner covers:
 - standalone Watch app bundle metadata
 - Watch monitoring starts independently of notification authorization
 - complete and accessible iPhone history correction actions
+- explicit Watch ownership of live sessions and skip controls
 
 ## Generate Xcode Project
 

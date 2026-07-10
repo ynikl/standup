@@ -18,6 +18,7 @@ final class StandUpAppModel: ObservableObject {
     private let storage: StandUpStorage
     private let notifier: StandUpNotificationScheduling
     private let sync: StandUpSyncing
+    private let managesReminders: Bool
     private var lastReminderPlan: ReminderPlan?
     private var reminderReconciliationTask: Task<Void, Never>?
     private var reminderReconciliationGeneration = 0
@@ -31,6 +32,7 @@ final class StandUpAppModel: ObservableObject {
         storage: StandUpStorage? = nil,
         notifier: StandUpNotificationScheduling? = nil,
         sync: StandUpSyncing? = nil,
+        managesReminders: Bool = true,
         now: Date = Date()
     ) {
         let storage = storage ?? LocalJSONStandUpStorage()
@@ -39,6 +41,7 @@ final class StandUpAppModel: ObservableObject {
         self.storage = storage
         self.notifier = notifier
         self.sync = sync
+        self.managesReminders = managesReminders
 
         let persisted: StandUpLocalState
         let loadError: String?
@@ -269,6 +272,10 @@ final class StandUpAppModel: ObservableObject {
     }
 
     private func reconcileReminders(now: Date) {
+        guard managesReminders else {
+            return
+        }
+
         let plan = engine.reminderPlan(at: now)
         guard plan != lastReminderPlan else {
             return

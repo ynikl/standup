@@ -19,6 +19,8 @@ The iPhone app will:
 - show today's completed-record summary, history, trends, and synchronized settings;
 - stop requesting local notification permission at launch;
 - stop ticking its local engine from launch and from a dashboard refresh button;
+- construct its app model with reminder management disabled;
+- remove any pending StandUp reminders left by an earlier app version;
 - remove the live-session hero, skip controls, permission banner, and refresh button.
 
 The Watch app will continue to:
@@ -28,7 +30,7 @@ The Watch app will continue to:
 - show the live session status;
 - execute every skip action locally against the authoritative session.
 
-This change does not alter `StandUpAppModel`, the core engine, persistence schemas, analytics, or WatchConnectivity payloads.
+`StandUpAppModel` gains an injected reminder-management capability that defaults to enabled. Reminder reconciliation returns without touching the notification adapter when that capability is disabled. The core engine, persistence schemas, analytics, and WatchConnectivity payloads remain unchanged.
 
 ## Alternatives
 
@@ -48,7 +50,7 @@ No instructional placeholder replaces the removed controls. The remaining iPhone
 
 ## Error Handling
 
-Removing iPhone notification authorization also removes a permission warning for a capability that iPhone does not use. Existing storage and WatchConnectivity error handling is unchanged. Surfacing `operationalError` is a separate improvement because it affects all platforms and requires its own recovery design.
+Removing iPhone notification authorization also removes a permission warning for a capability that iPhone does not use. On launch, iPhone removes pending requests with the existing StandUp identifier prefix so reminders scheduled by an earlier version cannot survive the ownership change. This cleanup does not request notification permission. Existing storage and WatchConnectivity error handling is unchanged. Surfacing `operationalError` is a separate improvement because it affects all platforms and requires its own recovery design.
 
 ## Verification
 
@@ -56,7 +58,10 @@ Add a focused source contract check that requires:
 
 - no `model.ignore`, `StatusHero`, `IgnoreActionsView`, `PermissionBanner`, or refresh toolbar in `Apps/iOS/DashboardView.swift`;
 - no `requestPermissions` or local engine refresh in `Apps/iOS/StandUpiOSApp.swift`;
+- iPhone constructs `StandUpAppModel` with reminder management disabled and cancels legacy pending reminders;
 - Watch startup still starts motion monitoring and requests notification permission;
 - `WatchRootView` still invokes `model.ignore(duration)`.
+
+Add a shared behavior check that changes local settings and receives newer synchronized settings through a review-only model, then verifies its notification adapter received no replacement plans.
 
 Run the complete core and shared checks, all existing source checks, `swift build`, and both iOS and Watch simulator-SDK builds. Real-device WatchConnectivity behavior is unaffected because the synchronization protocol does not change.

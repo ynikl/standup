@@ -2,15 +2,14 @@ import SwiftUI
 
 @main
 struct StandUpiOSApp: App {
-    @StateObject private var model = StandUpAppModel()
+    @StateObject private var model = StandUpAppModel(managesReminders: false)
 
     var body: some Scene {
         WindowGroup {
             RootTabView()
                 .environmentObject(model)
                 .task {
-                    await model.requestPermissions()
-                    model.refresh()
+                    await LocalStandUpNotificationScheduler().cancelSedentaryReminders()
                 }
         }
     }

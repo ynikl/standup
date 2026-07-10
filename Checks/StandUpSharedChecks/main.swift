@@ -51,9 +51,11 @@ struct StandUpSharedChecks {
         print("PASS latest reminder plan wins")
         try await checkThresholdTickPreservesPlannedReminder()
         print("PASS threshold tick preserves planned reminder")
+        try await checkReviewOnlyModelNeverSchedulesReminders()
+        print("PASS review-only model never schedules reminders")
         try checkReportsSessionActivationFailure()
         print("PASS reports session activation failure")
-        print("\nAll 13 shared checks passed")
+        print("\nAll 14 shared checks passed")
     }
 
     private static func checkRestoresPersistedSession() throws {
@@ -340,6 +342,39 @@ struct StandUpSharedChecks {
             "pending threshold reminder should be preserved"
         )
         try expect(plan.reminders.count <= 60, "adapter plan should preserve the 60 request cap")
+    }
+
+    private static func checkReviewOnlyModelNeverSchedulesReminders() async throws {
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+        let settings = StandUpSettings(
+            activeWindow: ActiveWindow(startMinuteOfDay: 0, endMinuteOfDay: 24 * 60)
+        )
+        let synchronized = StandUpDataState(settings: settings, settingsUpdatedAt: now, records: [])
+        let notifier = RecordingNotifier()
+        let sync = MemorySync()
+        let model = StandUpAppModel(
+            storage: MemoryStorage(state: StandUpLocalState(synchronized: synchronized)),
+            notifier: notifier,
+            sync: sync,
+            managesReminders: false,
+            now: now
+        )
+
+        model.updateThreshold(minutes: 60, now: now.addingTimeInterval(1))
+        sync.onReceive?(
+            StandUpDataState(
+                settings: StandUpSettings(
+                    sedentaryThresholdMinutes: 75,
+                    activeWindow: ActiveWindow(startMinuteOfDay: 8 * 60, endMinuteOfDay: 20 * 60)
+                ),
+                settingsUpdatedAt: now.addingTimeInterval(2),
+                records: []
+            )
+        )
+        await model.waitForReminderReconciliation()
+
+        try expect(model.settings.sedentaryThresholdMinutes == 75, "review-only model should merge settings")
+        try expect(notifier.plans.isEmpty, "review-only model must not replace reminders")
     }
 
     private static func checkReportsSessionActivationFailure() throws {

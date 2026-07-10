@@ -31,6 +31,7 @@ Checks/check-watch-timeline.sh
 Checks/check-watch-bundle-metadata.sh
 Checks/check-watch-startup-order.sh
 Checks/check-history-correction-menu.sh
+Checks/check-platform-session-ownership.sh
 swift build
 ```
 
