@@ -31,6 +31,8 @@ struct StandUpSharedChecks {
         print("PASS restores persisted session")
         try checkPersistsSessionAfterActivity()
         print("PASS persists session after activity")
+        try checkPersistsOnlyStateChangingTicks()
+        print("PASS persists only state-changing ticks")
         try checkBuildsStableRequestsFromPlan()
         print("PASS builds stable requests from plan")
         try await checkReconcilesReminderPlan()
@@ -49,7 +51,7 @@ struct StandUpSharedChecks {
         print("PASS threshold tick preserves planned reminder")
         try checkReportsSessionActivationFailure()
         print("PASS reports session activation failure")
-        print("\nAll 11 shared checks passed")
+        print("\nAll 12 shared checks passed")
     }
 
     private static func checkRestoresPersistedSession() throws {
@@ -91,6 +93,34 @@ struct StandUpSharedChecks {
         model.ingest(activity: .sedentary, now: now)
 
         try expect(storage.state.session.seatedSince == now, "activity should persist session start")
+    }
+
+    private static func checkPersistsOnlyStateChangingTicks() throws {
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+        let settings = StandUpSettings(
+            activeWindow: ActiveWindow(startMinuteOfDay: 0, endMinuteOfDay: 24 * 60)
+        )
+        let synchronized = StandUpDataState(settings: settings, settingsUpdatedAt: now, records: [])
+        let storage = MemoryStorage(state: StandUpLocalState(synchronized: synchronized))
+        let model = StandUpAppModel(
+            storage: storage,
+            notifier: NoopNotifier(),
+            sync: MemorySync(),
+            now: now
+        )
+
+        model.ingest(activity: .sedentary, now: now)
+        try expect(storage.saveCount == 1, "session start should persist")
+
+        model.refresh(now: now.addingTimeInterval(60))
+        try expect(storage.saveCount == 1, "unchanged tick should not persist")
+
+        model.refresh(now: now.addingTimeInterval(45 * 60))
+        try expect(storage.saveCount == 2, "threshold tick should persist")
+        try expect(
+            storage.state.session.thresholdReachedAt == now.addingTimeInterval(45 * 60),
+            "threshold transition should be recoverable"
+        )
     }
 
     private static func checkBuildsStableRequestsFromPlan() throws {
@@ -297,6 +327,7 @@ struct StandUpSharedChecks {
 
 private final class MemoryStorage: StandUpStorage {
     var state: StandUpLocalState
+    var saveCount = 0
 
     init(state: StandUpLocalState) {
         self.state = state
@@ -307,6 +338,7 @@ private final class MemoryStorage: StandUpStorage {
     }
 
     func save(_ state: StandUpLocalState) throws {
+        saveCount += 1
         self.state = state
     }
 }

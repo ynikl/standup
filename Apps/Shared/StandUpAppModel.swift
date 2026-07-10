@@ -88,17 +88,32 @@ final class StandUpAppModel: ObservableObject {
         if lastReminderPlan == nil {
             reconcileReminders(now: now)
         }
-        apply(engine.ingest(.tick, at: now), at: now, reconcilePlan: false)
+        let previousSession = engine.sessionState
+        let output = engine.ingest(.tick, at: now)
+        apply(
+            output,
+            at: now,
+            sessionChanged: previousSession != engine.sessionState,
+            reconcilePlan: false
+        )
     }
 
     func ingest(activity: ActivitySignal, now: Date = Date()) {
         permissionState.motionAllowed = activity == .unavailable ? false : true
+        let previousSession = engine.sessionState
         let output = engine.ingest(.activity(activity), at: now)
-        apply(output, at: now, reconcilePlan: !output.shouldNotify)
+        apply(
+            output,
+            at: now,
+            sessionChanged: previousSession != engine.sessionState,
+            reconcilePlan: !output.shouldNotify
+        )
     }
 
     func ignore(_ duration: IgnoreDuration, now: Date = Date()) {
-        apply(engine.ingest(.ignore(duration), at: now), at: now)
+        let previousSession = engine.sessionState
+        let output = engine.ingest(.ignore(duration), at: now)
+        apply(output, at: now, sessionChanged: previousSession != engine.sessionState)
     }
 
     func updateThreshold(minutes: Int, now: Date = Date()) {
@@ -173,14 +188,21 @@ final class StandUpAppModel: ObservableObject {
         await reminderReconciliationTask?.value
     }
 
-    private func apply(_ output: EngineOutput, at now: Date, reconcilePlan: Bool = true) {
+    private func apply(
+        _ output: EngineOutput,
+        at now: Date,
+        sessionChanged: Bool,
+        reconcilePlan: Bool = true
+    ) {
         if !output.endedRecords.isEmpty {
             records = (output.endedRecords + records).deduplicatedByID()
         }
 
         lastNotificationReason = output.notificationReason
         snapshot = engine.snapshot(at: now)
-        persist(synchronize: !output.endedRecords.isEmpty)
+        if sessionChanged || !output.endedRecords.isEmpty {
+            persist(synchronize: !output.endedRecords.isEmpty)
+        }
         if reconcilePlan {
             reconcileReminders(now: now)
         }
