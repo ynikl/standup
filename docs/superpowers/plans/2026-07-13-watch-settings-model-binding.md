@@ -125,7 +125,7 @@ git commit -m "fix: 修复 Watch 阈值状态回写"
 - Verify: `Checks/check-platform-session-ownership.sh`
 - Modify: `docs/superpowers/plans/2026-07-13-watch-settings-model-binding.md`
 
-- [ ] **Step 1: Run all package and source checks**
+- [x] **Step 1: Run all package and source checks**
 
 Run each command independently:
 
@@ -143,7 +143,7 @@ swift build
 
 Expected: 24 core checks and 20 shared checks pass, every source check exits 0, and the package build exits 0.
 
-- [ ] **Step 2: Build both application targets**
+- [x] **Step 2: Build both application targets**
 
 Run:
 
@@ -165,7 +165,7 @@ xcodebuild -project StandUp.xcodeproj -target StandUpWatch \
 
 Expected: the Watch target ends with `** BUILD SUCCEEDED **` for both simulator architectures.
 
-- [ ] **Step 3: Request independent code review**
+- [x] **Step 3: Request independent code review**
 
 Review the implementation against `docs/superpowers/specs/2026-07-13-watch-settings-model-binding-design.md`. The review must confirm:
 
@@ -177,7 +177,7 @@ Review the implementation against `docs/superpowers/specs/2026-07-13-watch-setti
 
 Expected: the review reports no Critical or Important findings. If it reports one, do not mark this step complete; revise this plan with an explicit red-test, minimal-implementation, and green-verification sequence for that finding before editing code.
 
-- [ ] **Step 4: Record plan completion**
+- [x] **Step 4: Record plan completion**
 
 Mark every completed checkbox in this plan, then run:
 
