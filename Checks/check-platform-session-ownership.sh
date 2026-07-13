@@ -62,3 +62,28 @@ if ! rg --quiet --fixed-strings 'model.ignore(duration)' "$WATCH_ROOT"; then
     echo "Watch skip control must remain available" >&2
     exit 1
 fi
+
+for required in \
+    'private var thresholdBinding: Binding<Double>' \
+    'get: { Double(model.settings.sedentaryThresholdMinutes) }' \
+    'set: { model.updateThreshold(minutes: Int($0)) }' \
+    'Text("\(model.settings.sedentaryThresholdMinutes)m")' \
+    'Slider(value: thresholdBinding, in: 15...120, step: 5)'
+do
+    if ! rg --quiet --fixed-strings "$required" "$WATCH_ROOT"; then
+        echo "Watch threshold control is missing model binding: $required" >&2
+        exit 1
+    fi
+done
+
+for forbidden in \
+    '@State private var threshold' \
+    'Slider(value: $threshold' \
+    'threshold = Double(model.settings.sedentaryThresholdMinutes)' \
+    '.onChange(of: threshold)'
+do
+    if rg --quiet --fixed-strings "$forbidden" "$WATCH_ROOT"; then
+        echo "Watch threshold control must not mirror model state: $forbidden" >&2
+        exit 1
+    fi
+done

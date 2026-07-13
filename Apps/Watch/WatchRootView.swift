@@ -171,27 +171,27 @@ private struct WatchIgnoreView: View {
 
 private struct WatchSettingsView: View {
     @EnvironmentObject private var model: StandUpAppModel
-    @State private var threshold = 45.0
 
     var body: some View {
         VStack(spacing: 12) {
             Text("Threshold")
                 .font(.headline)
 
-            Text("\(Int(threshold))m")
+            Text("\(model.settings.sedentaryThresholdMinutes)m")
                 .font(.system(size: 34, weight: .bold, design: .rounded))
                 .monospacedDigit()
 
-            Slider(value: $threshold, in: 15...120, step: 5)
+            Slider(value: thresholdBinding, in: 15...120, step: 5)
                 .tint(.watchAccent)
         }
         .padding(.horizontal, 12)
-        .onAppear {
-            threshold = Double(model.settings.sedentaryThresholdMinutes)
-        }
-        .onChange(of: threshold) { _, newValue in
-            model.updateThreshold(minutes: Int(newValue))
-        }
+    }
+
+    private var thresholdBinding: Binding<Double> {
+        Binding(
+            get: { Double(model.settings.sedentaryThresholdMinutes) },
+            set: { model.updateThreshold(minutes: Int($0)) }
+        )
     }
 }
 
