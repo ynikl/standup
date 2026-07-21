@@ -11,6 +11,7 @@ public struct SedentarySessionState: Codable, Equatable, Sendable {
     public var ignoreEvents: [IgnoreEvent]
     public var pauseReason: PauseReason?
     public var latestActivity: ActivitySignal?
+    public var lastActivityAt: Date?
 
     public init(
         seatedSince: Date? = nil,
@@ -20,7 +21,8 @@ public struct SedentarySessionState: Codable, Equatable, Sendable {
         ignoreUntil: Date? = nil,
         ignoreEvents: [IgnoreEvent] = [],
         pauseReason: PauseReason? = nil,
-        latestActivity: ActivitySignal? = nil
+        latestActivity: ActivitySignal? = nil,
+        lastActivityAt: Date? = nil
     ) {
         self.seatedSince = seatedSince
         self.thresholdReachedAt = thresholdReachedAt
@@ -30,6 +32,7 @@ public struct SedentarySessionState: Codable, Equatable, Sendable {
         self.ignoreEvents = ignoreEvents
         self.pauseReason = pauseReason
         self.latestActivity = latestActivity
+        self.lastActivityAt = lastActivityAt
     }
 
     private enum CodingKeys: String, CodingKey {
@@ -41,6 +44,7 @@ public struct SedentarySessionState: Codable, Equatable, Sendable {
         case ignoreEvents
         case pauseReason
         case latestActivity
+        case lastActivityAt
     }
 
     public init(from decoder: Decoder) throws {
@@ -54,6 +58,9 @@ public struct SedentarySessionState: Codable, Equatable, Sendable {
         pauseReason = try container.decodeIfPresent(PauseReason.self, forKey: .pauseReason)
         latestActivity = try container.decodeIfPresent(ActivitySignal.self, forKey: .latestActivity)
             ?? (activeCandidateSince != nil ? .active : seatedSince != nil ? .sedentary : nil)
+        lastActivityAt = try container.decodeIfPresent(Date.self, forKey: .lastActivityAt)
+            ?? activeCandidateSince
+            ?? seatedSince
     }
 }
 
@@ -69,6 +76,7 @@ public struct SedentaryEngine: Equatable, Sendable {
     private var ignoreEvents: [IgnoreEvent]
     private var pauseReason: PauseReason?
     private var latestActivity: ActivitySignal?
+    private var lastActivityAt: Date?
 
     public init(
         settings: StandUpSettings,
@@ -92,6 +100,7 @@ public struct SedentaryEngine: Equatable, Sendable {
         self.ignoreEvents = restoredState.ignoreEvents
         self.pauseReason = restoredState.pauseReason
         self.latestActivity = restoredState.latestActivity
+        self.lastActivityAt = restoredState.lastActivityAt
     }
 
     public var sessionState: SedentarySessionState {
@@ -103,7 +112,8 @@ public struct SedentaryEngine: Equatable, Sendable {
             ignoreUntil: ignoreUntil,
             ignoreEvents: ignoreEvents,
             pauseReason: pauseReason,
-            latestActivity: latestActivity
+            latestActivity: latestActivity,
+            lastActivityAt: lastActivityAt
         )
     }
 
@@ -124,6 +134,11 @@ public struct SedentaryEngine: Equatable, Sendable {
             return evaluateReminder(at: now)
 
         case .activity(let activity):
+            if let lastActivityAt, now <= lastActivityAt {
+                return .empty
+            }
+            lastActivityAt = now
+
             switch activity {
             case .sedentary:
                 latestActivity = .sedentary
@@ -359,6 +374,10 @@ public struct SedentaryEngine: Equatable, Sendable {
                 return false
             }
         } else if state.latestActivity == .active {
+            return false
+        }
+
+        if let lastActivityAt = state.lastActivityAt, lastActivityAt > restoredAt {
             return false
         }
 

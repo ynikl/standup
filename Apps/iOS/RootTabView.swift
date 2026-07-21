@@ -5,22 +5,22 @@ struct RootTabView: View {
         TabView {
             DashboardView()
                 .tabItem {
-                    Label("Today", systemImage: "figure.stand")
+                    Label("今日", systemImage: "figure.stand")
                 }
 
             HistoryView()
                 .tabItem {
-                    Label("History", systemImage: "clock.arrow.circlepath")
+                    Label("历史", systemImage: "clock.arrow.circlepath")
                 }
 
             TrendsView()
                 .tabItem {
-                    Label("Trends", systemImage: "chart.bar.xaxis")
+                    Label("趋势", systemImage: "chart.bar.xaxis")
                 }
 
             SettingsView()
                 .tabItem {
-                    Label("Settings", systemImage: "slider.horizontal.3")
+                    Label("设置", systemImage: "slider.horizontal.3")
                 }
         }
         .tint(.standAccent)

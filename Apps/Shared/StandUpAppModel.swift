@@ -122,6 +122,18 @@ final class StandUpAppModel: ObservableObject {
         )
     }
 
+    func motionRecoveryStart(now: Date = Date(), calendar: Calendar = .current) -> Date {
+        guard let activeWindowStart = settings.activeWindow.start(containing: now, calendar: calendar) else {
+            return now
+        }
+
+        guard let lastActivityAt = engine.sessionState.lastActivityAt else {
+            return activeWindowStart
+        }
+
+        return max(activeWindowStart, lastActivityAt)
+    }
+
     func ignore(_ duration: IgnoreDuration, now: Date = Date()) {
         let previousSession = engine.sessionState
         let output = engine.ingest(.ignore(duration), at: now)

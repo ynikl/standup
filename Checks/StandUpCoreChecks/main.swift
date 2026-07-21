@@ -35,8 +35,11 @@ let checks: [(String, () throws -> Void)] = [
     ("sedentary movement interrupts active clear", checkInterruptedActivityClear),
     ("session state survives encoding and restoration", checkSessionRestoration),
     ("invalid restored sessions are discarded", checkInvalidSessionRestoration),
+    ("stale activity observations are ignored", checkStaleActivityObservation),
+    ("last activity time survives session completion", checkLastActivityTimeSurvivesCompletion),
     ("sensor unavailable pauses without backfilling", checkSensorUnavailable),
     ("outside active window does not notify", checkActiveWindow),
+    ("overnight active window finds its containing start", checkOvernightActiveWindowStart),
     ("active-window end follows wall-clock time across DST", checkActiveWindowDST),
     ("daily summaries exclude corrected records", checkDailySummaries),
     ("newer synchronized revisions win", checkSynchronizedMerge),
@@ -293,6 +296,33 @@ func checkInvalidSessionRestoration() throws {
     )
 }
 
+func checkStaleActivityObservation() throws {
+    var engine = SedentaryEngine(settings: .default, calendar: .standUpCheck)
+    let start = Date.standUpCheck(hour: 9, minute: 0)
+
+    _ = engine.ingest(.activity(.sedentary), at: start)
+    _ = engine.ingest(.activity(.active), at: start.adding(minutes: 10))
+    _ = engine.ingest(.activity(.sedentary), at: start.adding(minutes: 5))
+    _ = engine.ingest(.tick, at: start.adding(minutes: 12))
+
+    try expect(engine.snapshot(at: start.adding(minutes: 12)).seatedMinutes == nil, "stale sedentary activity must not cancel newer active movement")
+    try expect(engine.sessionState.lastActivityAt == start.adding(minutes: 10), "latest accepted activity time should remain monotonic")
+}
+
+func checkLastActivityTimeSurvivesCompletion() throws {
+    var engine = SedentaryEngine(settings: .default, calendar: .standUpCheck)
+    let start = Date.standUpCheck(hour: 9, minute: 0)
+    let activeAt = start.adding(minutes: 50)
+
+    _ = engine.ingest(.activity(.sedentary), at: start)
+    _ = engine.ingest(.tick, at: start.adding(minutes: 45))
+    _ = engine.ingest(.activity(.active), at: activeAt)
+    _ = engine.ingest(.tick, at: start.adding(minutes: 52))
+
+    try expect(engine.sessionState.seatedSince == nil, "completed session should clear its seated start")
+    try expect(engine.sessionState.lastActivityAt == activeAt, "completed session should retain the replay cursor")
+}
+
 func checkSensorUnavailable() throws {
     var engine = SedentaryEngine(settings: .default, calendar: .standUpCheck)
     let start = Date.standUpCheck(hour: 9, minute: 0)
@@ -314,6 +344,21 @@ func checkActiveWindow() throws {
 
     try expect(output.shouldNotify == false, "outside active window should not notify")
     try expect(engine.snapshot(at: evening.adding(minutes: 90)).phase == .paused(.outsideActiveWindow), "outside active window pause")
+}
+
+func checkOvernightActiveWindowStart() throws {
+    let window = ActiveWindow(startMinuteOfDay: 22 * 60, endMinuteOfDay: 6 * 60)
+    let afterMidnight = Date.standUpCheck(day: 10, hour: 1, minute: 0)
+    let expected = Date.standUpCheck(day: 9, hour: 22, minute: 0)
+
+    try expect(
+        window.start(containing: afterMidnight, calendar: .standUpCheck) == expected,
+        "overnight window should start on the previous calendar day"
+    )
+    try expect(
+        window.start(containing: Date.standUpCheck(day: 10, hour: 12, minute: 0), calendar: .standUpCheck) == nil,
+        "outside time should not have a containing active-window start"
+    )
 }
 
 func checkActiveWindowDST() throws {

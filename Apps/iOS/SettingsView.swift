@@ -11,7 +11,7 @@ struct SettingsView: View {
         NavigationStack {
             Form {
                 if let error = model.operationalError {
-                    Section("App status") {
+                    Section("应用状态") {
                         Label {
                             Text(error)
                                 .font(.footnote)
@@ -30,7 +30,7 @@ struct SettingsView: View {
                                     ProgressView()
                                         .controlSize(.small)
                                 }
-                                Text(model.isRetryingOperationalWork ? "Retrying..." : "Try again")
+                                Text(model.isRetryingOperationalWork ? "重试中…" : "重新尝试")
                                 Spacer()
                             }
                             .frame(minHeight: 44)
@@ -39,24 +39,28 @@ struct SettingsView: View {
                     }
                 }
 
-                Section("Sedentary threshold") {
+                Section {
                     Stepper(value: $threshold, in: 15...120, step: 5) {
                         HStack {
-                            Text("Remind after")
+                            Text("久坐提醒")
                             Spacer()
-                            Text("\(Int(threshold)) min")
+                            Text("\(Int(threshold)) 分钟")
                                 .foregroundStyle(.secondary)
                                 .monospacedDigit()
                         }
                     }
+                } header: {
+                    Text("久坐提醒阈值")
+                } footer: {
+                    Text("连续久坐达到该时长后，手表会提醒你起身活动。")
                 }
 
-                Section("Active hours") {
+                Section {
                     Stepper(value: $startHour, in: 0...23, step: 1) {
                         HStack {
-                            Text("Start")
+                            Text("开始")
                             Spacer()
-                            Text("\(Int(startHour)):00")
+                            Text(String(format: "%02d:00", Int(startHour)))
                                 .foregroundStyle(.secondary)
                                 .monospacedDigit()
                         }
@@ -64,23 +68,27 @@ struct SettingsView: View {
 
                     Stepper(value: $endHour, in: 1...24, step: 1) {
                         HStack {
-                            Text("End")
+                            Text("结束")
                             Spacer()
-                            Text(endHour == 24 ? "24:00" : "\(Int(endHour)):00")
+                            Text(String(format: "%02d:00", Int(endHour)))
                                 .foregroundStyle(.secondary)
                                 .monospacedDigit()
                         }
                     }
+                } header: {
+                    Text("活动时段")
+                } footer: {
+                    Text("仅在该时段内监测久坐，其余时间自动暂停，不打扰休息。")
                 }
 
-                Section("Privacy") {
-                    Label("Local data only", systemImage: "lock.shield")
-                    Label("No account or server sync", systemImage: "icloud.slash")
+                Section("隐私") {
+                    Label("数据仅保存在本机", systemImage: "lock.shield")
+                    Label("无需账号，不上传服务器", systemImage: "icloud.slash")
                 }
             }
-            .navigationTitle("Settings")
+            .navigationTitle("设置")
             .scrollContentBackground(.hidden)
-            .background(Color.standCanvas)
+            .background(Color.standCanvas.ignoresSafeArea())
             .onAppear {
                 syncControls(with: model.settings)
             }

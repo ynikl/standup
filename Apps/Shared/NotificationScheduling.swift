@@ -19,8 +19,8 @@ struct LocalStandUpNotificationScheduler: StandUpNotificationScheduling {
     func requests(for plan: ReminderPlan, now: Date) -> [UNNotificationRequest] {
         plan.reminders.map { reminder in
             let content = UNMutableNotificationContent()
-            content.title = reminder.reason == .repeatReminder ? "Still sitting" : "Time to stand"
-            content.body = "Stand or walk for 2 minutes to reset your sedentary timer."
+            content.title = reminder.reason == .repeatReminder ? "还在久坐哦" : "该起来活动啦"
+            content.body = "站起来走动 2 分钟，就能重置久坐计时。"
             content.sound = .default
             content.categoryIdentifier = "SEDENTARY_REMINDER"
 

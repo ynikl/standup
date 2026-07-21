@@ -49,7 +49,7 @@ done
 for required in \
     'model.refresh()' \
     'motion.start' \
-    'model.ingest(activity: signal)' \
+    'model.ingest(activity: observation.signal' \
     'await model.requestPermissions()'
 do
     if ! rg --quiet --fixed-strings "$required" "$WATCH_APP"; then
@@ -67,7 +67,7 @@ for required in \
     'private var thresholdBinding: Binding<Double>' \
     'get: { Double(model.settings.sedentaryThresholdMinutes) }' \
     'set: { model.updateThreshold(minutes: Int($0)) }' \
-    'Text("\(model.settings.sedentaryThresholdMinutes)m")' \
+    'Text("\(model.settings.sedentaryThresholdMinutes) 分钟")' \
     'Slider(value: thresholdBinding, in: 15...120, step: 5)'
 do
     if ! rg --quiet --fixed-strings "$required" "$WATCH_ROOT"; then

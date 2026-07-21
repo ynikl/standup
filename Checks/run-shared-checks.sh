@@ -25,6 +25,7 @@ xcrun swiftc \
     -I "$BUILD_DIR" \
     -L "$BUILD_DIR" \
     -lStandUpCore \
+    "$ROOT/Apps/Shared/MotionActivityClassification.swift" \
     "$ROOT/Apps/Shared/NotificationScheduling.swift" \
     "$ROOT/Apps/Shared/StandUpAppModel.swift" \
     "$ROOT/Apps/Shared/StandUpStorage.swift" \

@@ -4,3 +4,7 @@ DerivedData/
 *.xcuserstate
 xcuserdata/
 *.swp
+
+# 生成物（xcodegen / xcodebuild 输出，本地生成不入库）
+build/
+StandUp.xcodeproj/

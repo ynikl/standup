@@ -44,15 +44,23 @@ private struct WatchStatusView: View {
                     .font(.headline)
                     .multilineTextAlignment(.center)
 
-                Gauge(value: Double(min(model.snapshot.seatedMinutes ?? 0, model.settings.sedentaryThresholdMinutes)), in: 0...Double(model.settings.sedentaryThresholdMinutes)) {
-                    EmptyView()
-                }
-                .gaugeStyle(.linearCapacity)
-                .tint(color)
+                if let subtitle {
+                    Text(subtitle)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center)
+                        .minimumScaleFactor(0.8)
+                } else {
+                    Gauge(value: Double(min(model.snapshot.seatedMinutes ?? 0, model.settings.sedentaryThresholdMinutes)), in: 0...Double(model.settings.sedentaryThresholdMinutes)) {
+                        EmptyView()
+                    }
+                    .gaugeStyle(.linearCapacity)
+                    .tint(color)
 
-                Text("Goal \(model.settings.sedentaryThresholdMinutes)m")
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
+                    Text("目标 \(model.settings.sedentaryThresholdMinutes) 分钟")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
             }
             .padding(.horizontal, 10)
             .containerBackground(.watchSurface, for: .navigation)
@@ -68,13 +76,33 @@ private struct WatchStatusView: View {
     private var title: String {
         switch model.snapshot.phase {
         case .monitoring:
-            return "Tracking"
+            if model.snapshot.seatedMinutes == nil, model.permissionState.motionAllowed == nil {
+                return "校准中"
+            }
+            return "监测中"
         case .overdue:
-            return "Stand now"
+            return "该起身啦"
         case .ignored:
-            return "Skipped"
+            return "已延后"
         case .paused(let reason):
-            return reason == .sensorUnavailable ? "Sensor paused" : "Off hours"
+            return reason == .sensorUnavailable ? "运动数据暂停" : "非活动时段"
+        }
+    }
+
+    /// 暂停态下的可操作引导；监测中返回 nil。
+    private var subtitle: String? {
+        switch model.snapshot.phase {
+        case .monitoring, .overdue, .ignored:
+            return nil
+        case .paused(let reason):
+            if reason == .sensorUnavailable {
+                #if targetEnvironment(simulator)
+                return "模拟器不提供运动数据，请用真机验证监测"
+                #else
+                return "请在 iPhone「Watch」App →「隐私」开启「运动与健身」，抬腕后自动恢复"
+                #endif
+            }
+            return "当前不在活动时段，可在 iPhone 设置里调整时间"
         }
     }
 
@@ -86,8 +114,8 @@ private struct WatchStatusView: View {
             return "figure.stand"
         case .ignored:
             return "moon.zzz.fill"
-        case .paused:
-            return "pause.fill"
+        case .paused(let reason):
+            return reason == .sensorUnavailable ? "exclamationmark.triangle.fill" : "pause.fill"
         }
     }
 
@@ -129,7 +157,7 @@ private struct WatchOperationalRetryButton: View {
                 }
                 .buttonStyle(.plain)
                 .disabled(model.isRetryingOperationalWork)
-                .accessibilityLabel("Retry failed operation")
+                .accessibilityLabel("重试失败的操作")
                 .accessibilityHint(error)
             } else {
                 Color.clear
@@ -154,7 +182,7 @@ private struct WatchIgnoreView: View {
                 }
             }
         }
-        .navigationTitle("Skip")
+        .navigationTitle("延后提醒")
     }
 
     private func icon(for duration: IgnoreDuration) -> String {
@@ -174,12 +202,13 @@ private struct WatchSettingsView: View {
 
     var body: some View {
         VStack(spacing: 12) {
-            Text("Threshold")
+            Text("提醒阈值")
                 .font(.headline)
 
-            Text("\(model.settings.sedentaryThresholdMinutes)m")
-                .font(.system(size: 34, weight: .bold, design: .rounded))
+            Text("\(model.settings.sedentaryThresholdMinutes) 分钟")
+                .font(.system(size: 30, weight: .bold, design: .rounded))
                 .monospacedDigit()
+                .minimumScaleFactor(0.7)
 
             Slider(value: thresholdBinding, in: 15...120, step: 5)
                 .tint(.watchAccent)

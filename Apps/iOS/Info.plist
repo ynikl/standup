@@ -4,6 +4,8 @@
 <dict>
 	<key>CFBundleDevelopmentRegion</key>
 	<string>$(DEVELOPMENT_LANGUAGE)</string>
+	<key>CFBundleDisplayName</key>
+	<string>久坐提醒</string>
 	<key>CFBundleExecutable</key>
 	<string>$(EXECUTABLE_NAME)</string>
 	<key>CFBundleIdentifier</key>
@@ -12,8 +14,6 @@
 	<string>6.0</string>
 	<key>CFBundleName</key>
 	<string>StandUp</string>
-	<key>CFBundleDisplayName</key>
-	<string>StandUp</string>
 	<key>CFBundlePackageType</key>
 	<string>$(PRODUCT_BUNDLE_PACKAGE_TYPE)</string>
 	<key>CFBundleShortVersionString</key>
@@ -21,7 +21,7 @@
 	<key>CFBundleVersion</key>
 	<string>1</string>
 	<key>NSMotionUsageDescription</key>
-	<string>StandUp uses motion activity to estimate sitting and standing locally on your devices.</string>
+	<string>“久坐提醒”通过运动与健身数据判断你久坐还是活动。数据全部在本机处理，不会上传。</string>
 	<key>UILaunchScreen</key>
 	<dict/>
 </dict>

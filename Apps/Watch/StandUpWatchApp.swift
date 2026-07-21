@@ -2,6 +2,7 @@ import SwiftUI
 
 @main
 struct StandUpWatchApp: App {
+    @Environment(\.scenePhase) private var scenePhase
     @StateObject private var model = StandUpAppModel()
     private let motion = CoreMotionActivityService()
 
@@ -10,12 +11,24 @@ struct StandUpWatchApp: App {
             WatchRootView()
                 .environmentObject(model)
                 .task {
-                    model.refresh()
-                    motion.start { signal in
-                        model.ingest(activity: signal)
-                    }
+                    startMotionMonitoring()
                     await model.requestPermissions()
                 }
+                .onChange(of: scenePhase) { _, newPhase in
+                    if newPhase == .active {
+                        startMotionMonitoring()
+                    } else {
+                        motion.stop()
+                    }
+                }
+        }
+    }
+
+    private func startMotionMonitoring(now: Date = Date()) {
+        model.refresh(now: now)
+        motion.start(since: model.motionRecoveryStart(now: now)) { observation in
+            model.ingest(activity: observation.signal, now: observation.startedAt)
+            model.refresh()
         }
     }
 }

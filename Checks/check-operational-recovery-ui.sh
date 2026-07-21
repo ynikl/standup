@@ -18,7 +18,7 @@ do
 done
 
 for required in \
-    'Section("App status")' \
+    'Section("应用状态")' \
     'model.operationalError' \
     'model.retryOperationalWork()' \
     'ProgressView()' \
@@ -36,7 +36,7 @@ done
 for required in \
     'WatchOperationalRetryButton' \
     '.frame(width: 44, height: 44)' \
-    '.accessibilityLabel("Retry failed operation")' \
+    '.accessibilityLabel("重试失败的操作")' \
     '.accessibilityHint(error)'
 do
     if ! rg --quiet --fixed-strings "$required" "$WATCH"; then

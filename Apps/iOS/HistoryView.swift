@@ -6,27 +6,37 @@ struct HistoryView: View {
 
     var body: some View {
         NavigationStack {
-            List {
-                ForEach(groupedRecords.keys.sorted(by: >), id: \.self) { day in
-                    Section(day.formatted(date: .abbreviated, time: .omitted)) {
-                        ForEach(groupedRecords[day] ?? []) { record in
-                            HistoryRow(
-                                record: record,
-                                correct: { reason in
-                                    model.correct(recordID: record.id, reason: reason)
-                                },
-                                restore: {
-                                    model.restore(recordID: record.id)
+            Group {
+                if model.records.isEmpty {
+                    ContentUnavailableView {
+                        Label("还没有久坐记录", systemImage: "clock.badge.checkmark")
+                    } description: {
+                        Text("戴上 Apple Watch 保持监测，久坐超时的记录会出现在这里。")
+                    }
+                } else {
+                    List {
+                        ForEach(groupedRecords.keys.sorted(by: >), id: \.self) { day in
+                            Section(day.formatted(date: .abbreviated, time: .omitted)) {
+                                ForEach(groupedRecords[day] ?? []) { record in
+                                    HistoryRow(
+                                        record: record,
+                                        correct: { reason in
+                                            model.correct(recordID: record.id, reason: reason)
+                                        },
+                                        restore: {
+                                            model.restore(recordID: record.id)
+                                        }
+                                    )
                                 }
-                            )
+                            }
                         }
                     }
+                    .listStyle(.insetGrouped)
+                    .scrollContentBackground(.hidden)
                 }
             }
-            .listStyle(.insetGrouped)
-            .scrollContentBackground(.hidden)
-            .background(Color.standCanvas)
-            .navigationTitle("History")
+            .background(Color.standCanvas.ignoresSafeArea())
+            .navigationTitle("历史")
         }
     }
 
@@ -48,26 +58,29 @@ private struct HistoryRow: View {
                 Text(StandUpFormatting.timeRange(record))
                     .font(.headline)
                     .monospacedDigit()
+                    .foregroundStyle(Color.standInk)
                 Spacer()
-                Text("+\(record.overageMinutes)m")
+                Text("+\(record.overageMinutes) 分钟")
                     .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(record.isExcludedFromStats ? .secondary : Color.standAlert)
+                    .monospacedDigit()
+                    .foregroundStyle(record.isExcludedFromStats ? Color.standInkSoft : Color.standAlert)
                 HistoryActionsMenu(record: record, correct: correct, restore: restore)
             }
 
-            HStack(spacing: 10) {
-                Label("\(record.continuousSedentaryMinutes)m sitting", systemImage: "chair")
+            HStack(spacing: 12) {
+                Label("久坐 \(record.continuousSedentaryMinutes) 分钟", systemImage: "chair")
                 if !record.ignoreEvents.isEmpty {
-                    Label("\(record.ignoreEvents.count) skip", systemImage: "moon.zzz")
+                    Label("延后 \(record.ignoreEvents.count) 次", systemImage: "moon.zzz")
                 }
                 if record.isExcludedFromStats {
-                    Label("excluded", systemImage: "line.3.horizontal.decrease.circle")
+                    Label("已排除", systemImage: "line.3.horizontal.decrease.circle")
                 }
             }
             .font(.caption)
-            .foregroundStyle(.secondary)
+            .foregroundStyle(Color.standInkSoft)
         }
         .padding(.vertical, 4)
+        .listRowBackground(Color.standSurface)
     }
 }
 
@@ -80,10 +93,10 @@ private struct HistoryActionsMenu: View {
         Menu {
             if record.isExcludedFromStats {
                 Button(action: restore) {
-                    Label("Restore to trends", systemImage: "arrow.uturn.backward")
+                    Label("恢复到趋势统计", systemImage: "arrow.uturn.backward")
                 }
             } else {
-                Section("Exclude from trends") {
+                Section("从趋势中排除") {
                     ForEach(CorrectionReason.allCases, id: \.rawValue) { reason in
                         Button {
                             correct(reason)
@@ -99,7 +112,7 @@ private struct HistoryActionsMenu: View {
                 .frame(width: 44, height: 44)
                 .contentShape(Rectangle())
         }
-        .accessibilityLabel("Actions for \(StandUpFormatting.timeRange(record))")
+        .accessibilityLabel("\(StandUpFormatting.timeRange(record)) 的操作")
     }
 
     private func icon(for reason: CorrectionReason) -> String {

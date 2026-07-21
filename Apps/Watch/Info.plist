@@ -13,7 +13,7 @@
 	<key>CFBundleName</key>
 	<string>StandUp</string>
 	<key>CFBundleDisplayName</key>
-	<string>StandUp</string>
+	<string>久坐提醒</string>
 	<key>CFBundlePackageType</key>
 	<string>$(PRODUCT_BUNDLE_PACKAGE_TYPE)</string>
 	<key>CFBundleShortVersionString</key>
@@ -21,7 +21,7 @@
 	<key>CFBundleVersion</key>
 	<string>1</string>
 	<key>NSMotionUsageDescription</key>
-	<string>StandUp uses motion activity to estimate sitting and standing locally on Apple Watch.</string>
+	<string>“久坐提醒”通过 Apple Watch 的运动数据判断你久坐还是活动，从而及时提醒你起身。数据全部在手表本机处理，不会上传。</string>
 	<key>WKApplication</key>
 	<true/>
 	<key>WKWatchOnly</key>

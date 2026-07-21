@@ -106,13 +106,13 @@ public enum CorrectionReason: String, Codable, Equatable, CaseIterable, Sendable
     public var displayTitle: String {
         switch self {
         case .watchingMovie:
-            return "Watching movie"
+            return "在看影片"
         case .meeting:
-            return "Meeting"
+            return "开会中"
         case .alreadyStood:
-            return "Already stood"
+            return "已经站起来了"
         case .other:
-            return "Other"
+            return "其他原因"
         }
     }
 }

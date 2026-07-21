@@ -27,6 +27,10 @@ func require<T>(_ value: T?, _ message: String) throws -> T {
 @MainActor
 struct StandUpSharedChecks {
     static func main() async throws {
+        try checkMotionActivityClassification()
+        print("PASS classifies only conclusive motion samples")
+        try checkNormalizesMotionHistory()
+        print("PASS normalizes motion history")
         try checkRestoresPersistedSession()
         print("PASS restores persisted session")
         try checkPersistsSessionAfterActivity()
@@ -67,7 +71,46 @@ struct StandUpSharedChecks {
         print("PASS retries sync activation")
         try checkReportsSessionActivationFailure()
         print("PASS reports session activation failure")
-        print("\nAll 20 shared checks passed")
+        try checkBuildsMotionRecoveryBoundary()
+        print("PASS builds motion recovery boundary")
+        print("\nAll 23 shared checks passed")
+    }
+
+    private static func checkMotionActivityClassification() throws {
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+
+        try expect(
+            MotionActivityClassifier.signal(for: MotionActivitySample(startedAt: now, stationary: true)) == .sedentary,
+            "stationary sample should start sedentary tracking"
+        )
+        try expect(
+            MotionActivityClassifier.signal(for: MotionActivitySample(startedAt: now, walking: true)) == .active,
+            "walking sample should count as active"
+        )
+        try expect(
+            MotionActivityClassifier.signal(for: MotionActivitySample(startedAt: now, unknown: true)) == nil,
+            "unknown sample should be inconclusive rather than unavailable"
+        )
+        try expect(
+            MotionActivityClassifier.signal(for: MotionActivitySample(startedAt: now, automotive: true)) == nil,
+            "automotive-only sample should not masquerade as a sensor failure"
+        )
+    }
+
+    private static func checkNormalizesMotionHistory() throws {
+        let start = Date(timeIntervalSince1970: 1_800_000_000)
+        let samples = [
+            MotionActivitySample(startedAt: start.addingTimeInterval(120), walking: true),
+            MotionActivitySample(startedAt: start.addingTimeInterval(-60), stationary: true),
+            MotionActivitySample(startedAt: start.addingTimeInterval(60), stationary: true),
+            MotionActivitySample(startedAt: start.addingTimeInterval(180), unknown: true)
+        ]
+
+        let observations = MotionActivityClassifier.normalizedObservations(from: samples, since: start)
+
+        try expect(observations.count == 2, "history should omit inconclusive and consecutive duplicate samples")
+        try expect(observations[0] == MotionActivityObservation(signal: .sedentary, startedAt: start), "first sample should be clamped to recovery start")
+        try expect(observations[1] == MotionActivityObservation(signal: .active, startedAt: start.addingTimeInterval(120)), "history should be chronological")
     }
 
     private static func checkRestoresPersistedSession() throws {
@@ -109,6 +152,45 @@ struct StandUpSharedChecks {
         model.ingest(activity: .sedentary, now: now)
 
         try expect(storage.state.session.seatedSince == now, "activity should persist session start")
+    }
+
+    private static func checkBuildsMotionRecoveryBoundary() throws {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(secondsFromGMT: 0)!
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+        let activeStart = calendar.startOfDay(for: now)
+        let lastActivityAt = now.addingTimeInterval(-15 * 60)
+        let settings = StandUpSettings(
+            activeWindow: ActiveWindow(startMinuteOfDay: 0, endMinuteOfDay: 24 * 60)
+        )
+        let storage = MemoryStorage(
+            state: StandUpLocalState(
+                synchronized: StandUpDataState(settings: settings, settingsUpdatedAt: now, records: []),
+                session: SedentarySessionState(lastActivityAt: lastActivityAt)
+            )
+        )
+        let model = StandUpAppModel(
+            storage: storage,
+            notifier: NoopNotifier(),
+            sync: MemorySync(),
+            managesReminders: false,
+            now: now
+        )
+
+        try expect(model.motionRecoveryStart(now: now, calendar: calendar) == lastActivityAt, "persisted activity time should be the recovery cursor")
+
+        let freshModel = StandUpAppModel(
+            storage: MemoryStorage(
+                state: StandUpLocalState(
+                    synchronized: StandUpDataState(settings: settings, settingsUpdatedAt: now, records: [])
+                )
+            ),
+            notifier: NoopNotifier(),
+            sync: MemorySync(),
+            managesReminders: false,
+            now: now
+        )
+        try expect(freshModel.motionRecoveryStart(now: now, calendar: calendar) == activeStart, "fresh monitoring should recover from the active-window start")
     }
 
     private static func checkPersistsOnlyStateChangingTicks() throws {

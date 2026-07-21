@@ -82,6 +82,24 @@ public struct ActiveWindow: Codable, Equatable, Sendable {
         wallClockDate(on: date, minuteOfDay: startMinuteOfDay, calendar: calendar)
     }
 
+    public func start(containing date: Date, calendar: Calendar) -> Date? {
+        guard contains(date, calendar: calendar) else {
+            return nil
+        }
+
+        let todayStart = start(on: date, calendar: calendar)
+        if todayStart <= date {
+            return todayStart
+        }
+
+        let previousDay = calendar.date(
+            byAdding: .day,
+            value: -1,
+            to: calendar.startOfDay(for: date)
+        ) ?? date.addingTimeInterval(-24 * 60 * 60)
+        return start(on: previousDay, calendar: calendar)
+    }
+
     private func wallClockDate(on date: Date, minuteOfDay: Int, calendar: Calendar) -> Date {
         let dayOffset = minuteOfDay / (24 * 60)
         let normalizedMinute = minuteOfDay % (24 * 60)
@@ -125,15 +143,15 @@ public enum IgnoreDuration: String, CaseIterable, Codable, Equatable, Sendable {
     public var displayTitle: String {
         switch self {
         case .fifteenMinutes:
-            return "15 min"
+            return "15 分钟"
         case .thirtyMinutes:
-            return "30 min"
+            return "30 分钟"
         case .oneHour:
-            return "1 hour"
+            return "1 小时"
         case .twoHours:
-            return "2 hours"
+            return "2 小时"
         case .untilTomorrow:
-            return "Until tomorrow"
+            return "直到明天"
         }
     }
 
