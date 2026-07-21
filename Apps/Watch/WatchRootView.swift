@@ -54,7 +54,7 @@ private struct WatchStatusView: View {
                     Gauge(value: Double(min(model.snapshot.seatedMinutes ?? 0, model.settings.sedentaryThresholdMinutes)), in: 0...Double(model.settings.sedentaryThresholdMinutes)) {
                         EmptyView()
                     }
-                    .gaugeStyle(.linearCapacity)
+                    .gaugeStyle(.accessoryLinearCapacity)
                     .tint(color)
 
                     Text("目标 \(model.settings.sedentaryThresholdMinutes) 分钟")
