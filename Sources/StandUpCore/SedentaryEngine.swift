@@ -141,8 +141,23 @@ public struct SedentaryEngine: Equatable, Sendable {
 
             switch activity {
             case .sedentary:
-                latestActivity = .sedentary
                 pauseReason = nil
+                // A stationary sample marks the end of the current active
+                // period. Core Motion usually reports a walk as a single active
+                // sample followed directly by this stationary sample, so the
+                // active duration must be credited here at the transition —
+                // otherwise a real walk is never counted and the previous
+                // sedentary timer keeps running. Evaluate the clear before
+                // overwriting `latestActivity` so the elapsed active minutes
+                // (from `activeCandidateSince` to `now`) are measured against
+                // the accurate transition timestamps.
+                if let ended = evaluateActiveClear(at: now) {
+                    latestActivity = .sedentary
+                    seatedSince = now
+                    return EngineOutput(endedRecords: ended)
+                }
+
+                latestActivity = .sedentary
                 activeCandidateSince = nil
                 if seatedSince == nil {
                     seatedSince = now

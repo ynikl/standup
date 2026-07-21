@@ -33,6 +33,8 @@ let checks: [(String, () throws -> Void)] = [
     ("continuous activity clears after two minutes", checkActivityClear),
     ("tick clears continuous active movement", checkTickActivityClear),
     ("sedentary movement interrupts active clear", checkInterruptedActivityClear),
+    ("walking then sitting clears the previous session", checkActiveThenSedentaryClear),
+    ("qualifying walk resets timer even below threshold", checkSubThresholdWalkResetsTimer),
     ("session state survives encoding and restoration", checkSessionRestoration),
     ("invalid restored sessions are discarded", checkInvalidSessionRestoration),
     ("stale activity observations are ignored", checkStaleActivityObservation),
@@ -239,6 +241,45 @@ func checkInterruptedActivityClear() throws {
     let output = engine.ingest(.tick, at: start.adding(minutes: 52))
 
     try expect(output.endedRecords.isEmpty, "sedentary signal should cancel active candidate")
+}
+
+func checkActiveThenSedentaryClear() throws {
+    var engine = SedentaryEngine(settings: .default, calendar: .standUpCheck)
+    let start = Date.standUpCheck(hour: 9, minute: 0)
+
+    _ = engine.ingest(.activity(.sedentary), at: start)
+    _ = engine.ingest(.tick, at: start.adding(minutes: 45))
+    // A single active sample (walk begins) followed directly by sitting again,
+    // three minutes later, with no tick in between — the real-world pattern.
+    _ = engine.ingest(.activity(.active), at: start.adding(minutes: 50))
+    let output = engine.ingest(.activity(.sedentary), at: start.adding(minutes: 53))
+
+    let record = try require(output.endedRecords.first, "walk of two+ minutes then sitting should end the session")
+    try expect(record.endReason == .stoodUp, "end reason is stood up")
+    try expect(record.sedentaryStartedAt == start, "record starts at original sit")
+    try expect(record.endedAt == start.adding(minutes: 53), "record ends when sitting resumes")
+    try expect(record.overageMinutes == 8, "overage counts up to the walk")
+
+    let snapshot = engine.snapshot(at: start.adding(minutes: 53))
+    try expect(snapshot.phase == .monitoring, "a fresh session begins after the walk")
+    try expect(snapshot.seatedMinutes == 0, "fresh sitting timer starts at zero")
+}
+
+func checkSubThresholdWalkResetsTimer() throws {
+    var engine = SedentaryEngine(settings: .default, calendar: .standUpCheck)
+    let start = Date.standUpCheck(hour: 9, minute: 0)
+
+    // Sit ten minutes (well below the 45-minute threshold), walk three minutes,
+    // then sit again. No record is produced, but the sitting timer must reset.
+    _ = engine.ingest(.activity(.sedentary), at: start)
+    _ = engine.ingest(.activity(.active), at: start.adding(minutes: 10))
+    let output = engine.ingest(.activity(.sedentary), at: start.adding(minutes: 13))
+
+    try expect(output.endedRecords.isEmpty, "a sub-threshold sit produces no record")
+
+    let snapshot = engine.snapshot(at: start.adding(minutes: 13))
+    try expect(snapshot.phase == .monitoring, "still monitoring after the walk")
+    try expect(snapshot.seatedMinutes == 0, "the sitting timer resets after a qualifying walk")
 }
 
 func checkSessionRestoration() throws {
