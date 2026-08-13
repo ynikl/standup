@@ -92,6 +92,8 @@ final class StandUpAppModel: ObservableObject {
         self.sync.onActivation = { [weak self] in
             self?.syncReceiveError = nil
             self?.refreshOperationalError()
+            // 链路刚建立时对端可能错过了此前的变更，主动推一次全量状态让双端收敛。
+            self?.publishSynchronizedState()
         }
         self.sync.activate()
     }

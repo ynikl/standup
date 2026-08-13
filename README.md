@@ -45,4 +45,9 @@ xcodegen generate
 open StandUp.xcodeproj
 ```
 
+The watch app is a companion app embedded in the iOS app (`com.standup.app` +
+`com.standup.app.watchkitapp`), so WatchConnectivity can sync records and
+settings between the two. Build the `StandUpiOS` scheme to get both apps;
+the `StandUpWatch` scheme builds/runs the watch app alone.
+
 See `docs/DEVELOPMENT.md` for setup and real-device validation notes.

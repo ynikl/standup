@@ -24,7 +24,7 @@
 	<string>“久坐提醒”通过 Apple Watch 的运动数据判断你久坐还是活动，从而及时提醒你起身。数据全部在手表本机处理，不会上传。</string>
 	<key>WKApplication</key>
 	<true/>
-	<key>WKWatchOnly</key>
-	<true/>
+	<key>WKCompanionAppBundleIdentifier</key>
+	<string>com.standup.app</string>
 </dict>
 </plist>

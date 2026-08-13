@@ -2,7 +2,21 @@
 
 ## Current Environment Note
 
-This workspace currently has Swift command-line tooling, but no full Xcode install selected. `xcodebuild` reports that the active developer directory is Command Line Tools. Because of that, the pure Swift package can be verified here, while iOS/watchOS app targets need a full Xcode install.
+A full Xcode install exists at `/Applications/Xcode.app`, but `xcode-select` points at the Command Line Tools by default. Either fix the selection once:
+
+```sh
+sudo xcode-select -s /Applications/Xcode.app/Contents/Developer
+```
+
+or prefix commands with `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer` (no sudo needed), e.g.:
+
+```sh
+DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer \
+  xcodebuild -project StandUp.xcodeproj -scheme StandUpWatch \
+  -destination 'platform=watchOS Simulator,name=StandUp Watch' build
+```
+
+Running the iOS app additionally requires the iOS platform component (Xcode > Settings > Components, or `xcodebuild -downloadPlatform iOS`).
 
 ## Verify Core Logic
 
@@ -53,9 +67,11 @@ open StandUp.xcodeproj
 After opening the project:
 
 1. Set `DEVELOPMENT_TEAM` for `StandUpiOS` and `StandUpWatch`.
-2. Adjust bundle identifiers if needed.
-3. Run `StandUpiOS` on an iPhone simulator or device.
-4. Run `StandUpWatch` on an Apple Watch simulator or paired watch.
+2. Adjust bundle identifiers if needed (the watch app id must stay prefixed by the iOS app id, and `WKCompanionAppBundleIdentifier` in `Apps/Watch/Info.plist` must match the iOS app id).
+3. Run the `StandUpiOS` scheme on an iPhone simulator or device. The watch app is embedded and installs onto the paired Apple Watch automatically (or via the iPhone Watch app).
+4. Use the `StandUpWatch` scheme to run the watch app alone on a watch simulator.
+
+The companion pairing is what makes WatchConnectivity sync work: the watch app records sedentary sessions and publishes them through `updateApplicationContext`; the iPhone app receives and displays them. Two unrelated standalone apps cannot use WatchConnectivity.
 
 ## Real-Device Validation Checklist
 
